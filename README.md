@@ -1,2 +1,17 @@
 # pg_weave
-A PostgreSQL workspace for AI agents to explore schemas, run registered computations in the database, and reuse project knowledge across sessions.
+
+pg_weave 帮助 AI 助手围绕 PostgreSQL 项目持续工作：查清数据库结构，执行分析和实验，再把经过你确认的项目知识留给下一次使用。
+
+它主要解决三个问题：
+
+- **看懂数据库**：订单和支付怎么关联？某个字段是什么意思？
+- **完成分析和实验**：运行 SQL、调用已有计算函数，或者在数据库分支里试建索引、修改表结构。
+- **接着以前的工作做**：找到上次的分析结论，知道当时为什么这样设计，以及结论是否还适用。
+
+普通 PostgreSQL 可以直接连接。数据库支持分支时，pg_weave 还可以创建实验分支，让 AI 在里面尝试修改，做完后由你选择保留或删除。中间结果尽量留在数据库中，AI 只读取需要的摘要和数据。
+
+第一版做成 DeepSeek Harness 的原生插件。在 Harness 里添加数据库连接、开展分析和实验，直接查看结果，并在 pg_weave 面板中审核和整理知识。界面使用 Harness 的设置、面板和工具卡片，不另外做独立 Web 应用。项目知识保存在本地，换一次对话也能继续使用。
+
+核心功能会单独实现，后续通过 MCP 接入 Codex、Claude Code 等 AI 助手。数据库分支也通过独立接口接入，开发时先用 Stello 验证，之后可以增加其他实现。
+
+项目目前处于产品设计阶段，尚未开始功能实现。具体范围、使用流程和开发顺序见 [产品规划](PRODUCT.md)。
