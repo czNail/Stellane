@@ -18,9 +18,9 @@ test('real PostgreSQL query, parameters, row limit and read-only boundary', asyn
     assert.equal(target.user, 'stellane_reader');
     const environment = core.createEnvironment({ connectionId: saved.id, name: 'integration' });
     const query = (sql: string, values: (string | number | boolean | null)[] = []) => core.query({ environmentId: environment.id, sql, values }, actor);
-    const result = await query('SELECT customer, quantity FROM demo_orders WHERE quantity > $1 ORDER BY id', [100]);
+    const result = await query('SELECT label, value FROM sample_data WHERE value > $1 ORDER BY id', [100]);
     assert.equal(result.status, 'succeeded', result.error);
-    assert.deepEqual(result.preview?.rows.map(row => row.quantity), [120, 160]);
+    assert.deepEqual(result.preview?.rows.map(row => row.value), [120, 160]);
     const large = await query('SELECT generate_series(1, 1000) AS n');
     assert.equal(large.preview?.rows.length, 200);
     assert.equal(large.preview?.truncated, true);
@@ -30,13 +30,13 @@ test('real PostgreSQL query, parameters, row limit and read-only boundary', asyn
     assert.equal(oversized.status, 'failed');
     assert.match(oversized.error ?? '', /128 KiB/);
     for (const sql of [
-      'DELETE FROM demo_orders',
-      'SELECT 1; COMMIT; DELETE FROM demo_orders',
-      'WITH removed AS (DELETE FROM demo_orders RETURNING *) SELECT * FROM removed',
-      'SELECT 1) AS escape; COMMIT; DELETE FROM demo_orders; --',
+      'DELETE FROM sample_data',
+      'SELECT 1; COMMIT; DELETE FROM sample_data',
+      'WITH removed AS (DELETE FROM sample_data RETURNING *) SELECT * FROM removed',
+      'SELECT 1) AS escape; COMMIT; DELETE FROM sample_data; --',
       "SELECT set_config('transaction_read_only', 'off', true)",
     ]) assert.equal((await query(sql)).status, 'failed', sql);
-    const remaining = await query('SELECT count(*)::int AS count FROM demo_orders');
+    const remaining = await query('SELECT count(*)::int AS count FROM sample_data');
     assert.deepEqual(remaining.preview?.rows, [{ count: 3 }]);
     const password = await readFile(connection.passwordRef.slice(5), 'utf8');
     assert(!JSON.stringify(core.snapshot()).includes(password));

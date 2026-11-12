@@ -4,10 +4,11 @@ import argparse
 import importlib.util
 import json
 import os
-from pathlib import Path
+import re
 import secrets
 import subprocess
 import time
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / '.stellane-dev' / 'stello'
@@ -56,9 +57,13 @@ def execute(*args, **kwargs):
                   f'LD_LIBRARY_PATH={STATE}/install/lib:{STATE}/install/lib/x86_64-linux-gnu', *args, **kwargs)
 
 
-def finish():
+def finish(project):
     install = STATE / 'install'
-    docker('update', '--memory', '6g', '--memory-swap', '12g', '--cpus', '4', '--pids-limit', '1024', HOST)
+    slots = json.loads((STATE / 'node/spec.json').read_text())['slots_per_compute']
+    memory_gib = slots // 2 + 2
+    object_memory_gib = max(1, slots // 8)
+    docker('update', '--memory', f'{object_memory_gib}g', '--memory-swap', f'{object_memory_gib * 2}g', '--cpus', '1', OBJECTS)
+    docker('update', '--memory', f'{memory_gib}g', '--memory-swap', f'{memory_gib * 2}g', '--cpus', '4', '--pids-limit', '2048', HOST)
     execute('python3', '-c', 'from pathlib import Path;import sys;'
             'Path("/etc/ld.so.conf.d/stellane.conf").write_text(sys.argv[1]+"/lib\\n"+sys.argv[1]+"/lib/x86_64-linux-gnu\\n")', str(install))
     execute('/usr/sbin/ldconfig', '-X')
@@ -71,22 +76,31 @@ def finish():
         execute(cli, 'database', 'create', 'stellane', '--json', timeout=300)
     execute(cli, 'connect', 'stellane/main', '--output', '/node/baseline', '--json')
     execute('env', 'PGSERVICEFILE=/node/baseline/pg_service.conf', install / 'bin/psql', '-X', '-v', 'ON_ERROR_STOP=1',
-            'service=stello', '-c', "CREATE TABLE IF NOT EXISTS demo_orders (id integer PRIMARY KEY, customer text NOT NULL, quantity integer NOT NULL, status text NOT NULL); "
-            "INSERT INTO demo_orders VALUES (1,'北辰',120,'待交付'),(2,'云川',80,'已发货'),(3,'星河',160,'待交付') ON CONFLICT DO NOTHING;")
+            'service=stello', '-c', "CREATE TABLE IF NOT EXISTS sample_data (id integer PRIMARY KEY, label text NOT NULL, value integer NOT NULL, group_name text NOT NULL); "
+            "INSERT INTO sample_data VALUES (1,'alpha',120,'group_a'),(2,'beta',80,'group_b'),(3,'gamma',160,'group_a') ON CONFLICT DO NOTHING;")
     if execute('test', '-f', '/node/export/client.json', check=False).returncode:
         execute(cli, 'context', 'export', '--output', '/node/export', '--json')
     execute('chown', '-R', f'{os.getuid()}:{os.getgid()}', '/node/export')
-    save(STATE / 'provider.json', {'name': 'Stellane 分支开发库', 'projectPath': str(ROOT),
+    save(STATE / 'provider.json', {'name': 'Stellane 分支开发库', 'projectPath': str(project),
          'configPath': str(node / 'export/client.json'), 'resource': 'stellane/main'})
     print(f'Stellane private Stello ready. Provider fields: {STATE / "provider.json"}')
 
 
 def main():
+    global STATE, OWNER, NETWORK, HOST, OBJECTS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['start', 'stop'], nargs='?', default='start')
     parser.add_argument('--source', type=Path, default=Path(os.environ['STELLO_SOURCE']) if os.environ.get('STELLO_SOURCE') else None)
     parser.add_argument('--prefix', type=Path)
+    parser.add_argument('--instance', default='phase2', help='isolated owned deployment name')
+    parser.add_argument('--slots', type=int, default=8)
+    parser.add_argument('--project', type=Path, default=ROOT)
     args = parser.parse_args()
+    if not re.fullmatch(r'[a-z0-9-]{1,16}', args.instance) or not 4 <= args.slots <= 16:
+        parser.error('instance must be 1..16 lowercase letters/digits/hyphens; slots must be 4..16')
+    STATE = ROOT / '.stellane-dev' / ('stello' if args.instance == 'phase2' else 'stello-' + args.instance)
+    OWNER = NETWORK = 'stellane-' + args.instance
+    HOST, OBJECTS = NETWORK + '-host', NETWORK + '-objects'
     os.umask(0o077)
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     host, objects = owned('container', HOST), owned('container', OBJECTS)
@@ -97,6 +111,8 @@ def main():
                 docker('stop', name, timeout=90)
         print('Stellane Stello stopped; containers, data and credentials retained.')
         return
+    project = args.project.resolve()
+    project.mkdir(parents=True, exist_ok=True)
     if host:
         if not objects or not network:
             raise RuntimeError('Incomplete owned deployment; inspect private state before continuing')
@@ -104,8 +120,7 @@ def main():
             docker('start', OBJECTS)
         if not host['State']['Running']:
             docker('start', HOST)
-        finish()
-        print(f'Existing owned Stello deployment: {STATE / "provider.json"}')
+        finish(project)
         return
     if objects or network:
         raise RuntimeError('Partial owned deployment exists; inspect it rather than overwrite its data')
@@ -133,9 +148,9 @@ def main():
     envfile = STATE / 'objects.env'
     envfile.write_text(f'RUSTFS_ACCESS_KEY={access}\nRUSTFS_SECRET_KEY={secret}\nRUSTFS_CONSOLE_ENABLE=false\n')
     docker('run', '-d', '--name', OBJECTS, '--network', NETWORK, '--label', f'com.stellane.owner={OWNER}',
-           '--memory', '512m', '--cpus', '1', '--env-file', envfile, RUSTFS, '/data')
+           '--memory', f'{max(1, args.slots // 8)}g', '--cpus', '1', '--env-file', envfile, RUSTFS, '/data')
     command = ['run', '-d', '--name', HOST, '--network', NETWORK, '--label', f'com.stellane.owner={OWNER}',
-               '--privileged', '--cgroupns=private', '--memory', '6g', '--cpus', '4', '--pids-limit', '1024', '--tmpfs', '/run', '--tmpfs', '/run/lock',
+               '--privileged', '--cgroupns=private', '--memory', f'{args.slots // 2 + 2}g', '--cpus', '4', '--pids-limit', '2048', '--tmpfs', '/run', '--tmpfs', '/run/lock',
                '--tmpfs', '/tmp:rw,mode=1777,size=256m', '--env', 'container=docker',
                '--mount', f'type=bind,src={units},dst=/etc/systemd/system',
                '--mount', f'type=bind,src={node},dst=/node',
@@ -174,10 +189,10 @@ def main():
     save(node / 'spec.json', {'version': 1, 'name': 'stellane', 'prefix': str(install),
          'root': '/srv/stello/stellane', 'user': os.environ.get('USER', 'nail'),
          'machines': {'node1': {'address': address, 'ssh': None}}, 'wal': ['node1'], 'page': 'node1',
-         'computes': ['node1'], 'object_store': '/node/objects.json', 'slots_per_compute': 8,
+         'computes': ['node1'], 'object_store': '/node/objects.json', 'slots_per_compute': args.slots,
          'disk_bytes_per_slot': 1024**3, 'memory_bytes_per_slot': 512*1024**2,
          'sql_client_cidr': subnet, 'replication_cidr': address + '/32', 'managed_objects': False})
-    finish()
+    finish(project)
 
 
 if __name__ == '__main__':

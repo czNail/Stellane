@@ -163,7 +163,7 @@ function Panel({ api, openConversation }: { api: Api; openConversation: (workspa
   const [derivedName, setDerivedName] = useState('工作方案');
   const [summary, setSummary] = useState('');
   const [recipientId, setRecipientId] = useState('');
-  const [evidenceSql, setEvidenceSql] = useState('SELECT * FROM demo_orders ORDER BY id;');
+  const [evidenceSql, setEvidenceSql] = useState('SELECT current_database() AS database, current_user AS role;');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState('');
   const environment = data.environments.find(item => item.id === selected) ?? data.environments[0];
@@ -237,8 +237,8 @@ function Panel({ api, openConversation }: { api: Api; openConversation: (workspa
     } catch (error) { setActionError(message(error)); }
   }
   return <main className="st-app">
-    <header className="st-header"><div><p className="st-eyebrow">STELLANE</p><h1>任务与数据环境</h1>
-      <p className="st-muted">固定父状态，独立尝试方案，交付可追溯的结果。</p></div>
+    <header className="st-header"><div><p className="st-eyebrow">STELLANE</p><h1>Agent Data Context</h1>
+      <p className="st-muted">连接数据，固定状态，在独立分支中探索并保存证据。</p></div>
       <button className="st-button" onClick={() => void refresh().catch(error => setActionError(message(error)))}>刷新</button>
     </header>
     <nav className="st-tabs" aria-label="Stellane 导航">

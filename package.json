@@ -1,7 +1,7 @@
 {
   "name": "@stellane/harness-plugin",
-  "version": "0.2.0-dev.1",
-  "description": "PostgreSQL data environments for DeepSeek Harness",
+  "version": "0.3.0-dev.1",
+  "description": "Agent Data Context for SQL agents",
   "type": "module",
   "license": "MIT",
   "main": "dist/host.js",

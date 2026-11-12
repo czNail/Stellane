@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { StellaneCore } from '../src/core/index.ts';
 import { Store } from '../src/core/store.ts';
 import type { QueryProvider } from '../src/providers/postgres.ts';
-import type { Actor, ConnectionInput, QueryPreview } from '../src/shared/models.ts';
+import { encodeResource, StelloProvider, StelloRequestError } from '../src/providers/stello.ts';
+import type { Actor, BranchOperation, ConnectionInput, QueryPreview, StelloSource } from '../src/shared/models.ts';
 
 const owner: Actor = { kind: 'user', id: 'owner' };
 const preview = (database = 'test'): QueryPreview => ({ columns: ['value'], rows: [{ value: 1 }], rowCount: 1, truncated: false,
@@ -53,7 +54,7 @@ test('Agent project identity fences environment discovery and SQL execution', as
     const allowed = await core.query({ environmentId: environment.id, sql: 'SELECT 1' }, { ...actor, projectPath: root });
     assert.equal(allowed.actor.id, 'agent-1');
     assert.equal(allowed.status, 'succeeded');
-    await assert.rejects(core.write({ environmentId: environment.id, sql: 'DELETE FROM demo_orders' }, { ...actor, projectPath: root }), /只能写入/);
+    await assert.rejects(core.write({ environmentId: environment.id, sql: 'DELETE FROM sample_data' }, { ...actor, projectPath: root }), /只能写入/);
     await assert.rejects(core.derive('fork', { environmentId: environment.id, name: 'unsupported' }, { ...actor, projectPath: root }), /没有分支/);
   } finally { await core.close(); await rm(root, { recursive: true, force: true }); await rm(other, { recursive: true, force: true }); }
 });
@@ -94,4 +95,43 @@ test('unfinished runs become interrupted after restart and are never replayed', 
     assert.equal(recovered.get('runs', run.id).status, 'interrupted');
     recovered.close();
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('Stello busy after admission observes the original ticket without replaying creation', async () => {
+  const id = randomUUID();
+  const providerId = randomUUID();
+  const parentIdentity = { service: 'test-service', slot: 0, incarnation: 1 };
+  const childIdentity = { ...parentIdentity, slot: 1 };
+  const parent = { providerId, resource: 'test/main', resourceId: 'parent', identity: parentIdentity, forkLsn: '0/1', managed: false };
+  const createdAt = new Date().toISOString();
+  const actions: string[] = [];
+  let observations = 0;
+  const operation: BranchOperation = {
+    id, kind: 'checkpoint', providerId, parentEnvironmentId: randomUUID(), resource: 'test/cut', actor: owner,
+    status: 'pending', createdAt,
+    environment: { id: randomUUID(), name: 'cut', projectPath: '/test', mode: 'fixed', access: 'read-only', createdAt },
+  };
+  class BusyProvider extends StelloProvider {
+    override async operation(_source: StelloSource, body: Record<string, unknown>, _signal: AbortSignal): Promise<unknown> {
+      actions.push(String(body.action));
+      if (body.action === 'prepare_resource') return {
+        identity: childIdentity, database: parentIdentity, parent_identity: parentIdentity, source_history: 'history',
+      };
+      if (body.action === 'branch_create') throw new StelloRequestError(409, 'branch_rejected', 'resource lifecycle busy; retry');
+      assert.equal(body.action, 'branch_get');
+      if (body.name === encodeResource(parent.resource)) return {
+        name: body.name, identity: parentIdentity, resource_id: 'parent', mode: 'writable', fork_lsn: '0/1', complete: true, state: 'ready',
+      };
+      if (observations++ === 0) throw new StelloRequestError(409, 'branch_rejected', 'resource lifecycle busy; retry');
+      return {
+        name: body.name, identity: childIdentity, resource_id: 'child', mode: 'fixed', fork_lsn: '0/A', complete: true, state: 'ready',
+        creation_id: id.replaceAll('-', ''), parent_identity: parentIdentity,
+      };
+    }
+  }
+  const source = { id: providerId, name: 'test', projectPath: '/test', configPath: '/unused', resource: 'test/main', createdAt };
+  const result = await new BusyProvider().create(source, parent, operation, request => { operation.request = request; }, AbortSignal.timeout(5000));
+  assert.equal(result.forkLsn, '0/A');
+  assert.equal(actions.filter(action => action === 'branch_create').length, 1);
+  assert(actions.every(action => ['branch_get', 'prepare_resource', 'branch_create'].includes(action)));
 });

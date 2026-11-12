@@ -38,6 +38,10 @@ export class StelloRequestError extends Error {
   }
 }
 
+function isBusy(error: unknown): boolean {
+  return error instanceof StelloRequestError && error.status === 409 && String(error.cause).includes('busy');
+}
+
 export class StelloProvider {
   readonly sql = new PostgresProvider();
   private readonly creating = new Map<string, Promise<void>>();
@@ -49,10 +53,11 @@ export class StelloProvider {
     if (ca.byteLength > 65536) throw new Error('Stello CA 文件过大。');
     const token = await secret(`file:${resolve(dirname(file), config.token_file)}`);
     const body = JSON.stringify(operation);
+    const timeoutMs = ['branch_create', 'branch_change', 'branch_retry'].includes(String(operation.action)) ? 120000 : 20000;
     return new Promise((accept, reject) => {
       const req = request(new URL('/v1/operations', config.endpoint), {
         method: 'POST', ca, rejectUnauthorized: true,
-        signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'content-length': Buffer.byteLength(body) },
       }, response => {
         const chunks: Buffer[] = []; let size = 0;
@@ -128,10 +133,19 @@ export class StelloProvider {
       mode: operation.kind === 'checkpoint' ? 'fixed' : 'writable', no_compute: false,
       lsn: 'latest', at: null, node: null, spec: null, extensions: [] };
     prepared(body);
-    await this.operation(source, body, signal);
+    try { await this.operation(source, body, signal); }
+    catch (error) {
+      // A busy reply can follow durable admission. Observe this exact ticket;
+      // never send a second create request or choose a replacement resource.
+      if (!isBusy(error)) throw error;
+    }
     const deadline = Date.now() + 120000;
     while (true) {
-      const binding = await this.reconcile(source, operation, signal);
+      let binding: BranchBinding | undefined;
+      try { binding = await this.reconcile(source, operation, signal); }
+      catch (error) {
+        if (!isBusy(error)) throw error;
+      }
       if (binding) return binding;
       if (Date.now() > deadline) throw new Error('Stello 派生仍未完成，请保留原操作并核对状态。');
       await setTimeout(400, undefined, { signal });

@@ -50,11 +50,11 @@ if (command === 'stop') {
   if (!/^[a-f0-9]{48}$/.test(readerPassword)) throw new Error('本地密码引用格式不正确。');
   const sql = `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stellane_reader') THEN
     CREATE ROLE stellane_reader LOGIN PASSWORD '${readerPassword}'; END IF; END $$;
-    CREATE TABLE IF NOT EXISTS demo_orders (id integer PRIMARY KEY, customer text NOT NULL, quantity integer NOT NULL, status text NOT NULL);
-    INSERT INTO demo_orders VALUES (1,'北辰',120,'待交付'),(2,'云川',80,'已发货'),(3,'星河',160,'待交付') ON CONFLICT DO NOTHING;
+    CREATE TABLE IF NOT EXISTS sample_data (id integer PRIMARY KEY, label text NOT NULL, value integer NOT NULL, group_name text NOT NULL);
+    INSERT INTO sample_data VALUES (1,'alpha',120,'group_a'),(2,'beta',80,'group_b'),(3,'gamma',160,'group_a') ON CONFLICT DO NOTHING;
     GRANT CONNECT ON DATABASE stellane TO stellane_reader;
     GRANT USAGE ON SCHEMA public TO stellane_reader;
-    GRANT SELECT ON demo_orders TO stellane_reader;
+    GRANT SELECT ON sample_data TO stellane_reader;
     ALTER ROLE stellane_reader SET default_transaction_read_only = on;`;
   docker(['exec', '-i', name, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'stellane'], { input: sql });
   const info = inspect('container', name);
