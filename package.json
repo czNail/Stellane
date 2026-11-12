@@ -1,6 +1,6 @@
 {
   "name": "@stellane/harness-plugin",
-  "version": "0.1.0-dev.1",
+  "version": "0.2.0-dev.1",
   "description": "PostgreSQL data environments for DeepSeek Harness",
   "type": "module",
   "license": "MIT",
@@ -12,7 +12,9 @@
   },
   "files": [
     "dist",
-    "stellane.patch.yml"
+    "stellane.patch.yml",
+    "DEVELOPMENT.md",
+    "PRODUCT.md"
   ],
   "engines": {
     "node": ">=24.9.0",
@@ -40,7 +42,9 @@
     "typecheck": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "test": "node --test --experimental-strip-types tests/core.test.ts",
     "test:integration": "node --test --experimental-strip-types tests/postgres.test.ts",
+    "test:stello": "node --test --experimental-strip-types tests/stello.test.ts",
     "dev:db": "node scripts/dev-db.mjs",
+    "dev:stello": "python3 -B scripts/dev-stello.py",
     "check": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {

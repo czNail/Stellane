@@ -9,7 +9,7 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { z } from 'zod';
 import { StellaneCore } from '../core/index.ts';
 import { PACKAGE, remoteInfo, type Reply, type Requests } from '../shared/remote.ts';
-import type { Actor, Connection, DatabaseTarget, Environment, Run, Snapshot } from '../shared/models.ts';
+import type { Actor, BranchOperation, Connection, DatabaseTarget, DeliveredResult, Environment, Run, Snapshot } from '../shared/models.ts';
 
 export interface Config { stateDirectory?: string }
 export const Config = Schema.object({
@@ -50,6 +50,30 @@ export class StellaneService extends TypertRemoteService {
   query(input: Requests['query'], signal: AbortSignal): Promise<Reply<Run>> {
     return this.owner(() => this.core.query(input, { kind: 'user', id: 'owner' }, signal));
   }
+  saveStello(input: Requests['saveStello'], signal: AbortSignal): Promise<Reply<Environment>> {
+    return this.owner(() => this.core.saveStello(input, signal));
+  }
+  checkpoint(input: Requests['checkpoint'], signal: AbortSignal): Promise<Reply<Environment>> {
+    return this.owner(() => this.core.derive('checkpoint', input, { kind: 'user', id: 'owner', callId: input.requestId }, signal));
+  }
+  fork(input: Requests['fork'], signal: AbortSignal): Promise<Reply<Environment>> {
+    return this.owner(() => this.core.derive('fork', input, { kind: 'user', id: 'owner', callId: input.requestId }, signal));
+  }
+  execute(input: Requests['execute'], signal: AbortSignal): Promise<Reply<Run>> {
+    return this.owner(() => this.core.write(input, { kind: 'user', id: 'owner', callId: input.requestId }, signal));
+  }
+  deliver(input: Requests['deliver'], signal: AbortSignal): Promise<Reply<DeliveredResult>> {
+    return this.owner(() => this.core.deliver(input, { kind: 'user', id: 'owner', callId: input.requestId }, signal));
+  }
+  results(input: Requests['results'], _signal: AbortSignal): Promise<Reply<DeliveredResult[]>> {
+    return this.owner(() => this.core.results(input.environmentId, { kind: 'user', id: 'owner' }));
+  }
+  reconcileRun(input: Requests['reconcileRun'], signal: AbortSignal): Promise<Reply<Run>> {
+    return this.owner(() => this.core.reconcileRun(input.runId, { kind: 'user', id: 'owner' }, signal));
+  }
+  reconcileOperation(input: Requests['reconcileOperation'], signal: AbortSignal): Promise<Reply<BranchOperation>> {
+    return this.owner(() => this.core.reconcileOperation(input.operationId, { kind: 'user', id: 'owner' }, signal));
+  }
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -62,16 +86,16 @@ export function apply(ctx: Context, config: Config): void {
     model: { services: [], events: [], objects: [] }, invocations: remoteInfo.descriptors,
   }));
   ctx.effect(() => () => core.close());
-  const actor = (agent: { id: string; session: { header: { cwd?: string } } } | undefined): Actor => {
+  const actor = (agent: { id: string; session: { header: { cwd?: string } } } | undefined, callId?: string): Actor => {
     if (!agent) throw new Error('工具调用必须关联真实 Agent。');
-    return { kind: 'agent', id: agent.id, projectPath: agent.session.header.cwd };
+    return { kind: 'agent', id: agent.id, projectPath: agent.session.header.cwd, callId };
   };
   ctx.tools.register(defineTool({
     name: 'stellane_environments',
-    description: '列出当前 Agent 项目中可用的 Stellane PostgreSQL 数据环境。查询前先取得环境 ID；第一阶段环境为直连、实时、只读。',
+    description: '列出当前 Agent 项目中可用的 Stellane 数据环境、来源、读写权限和 Stello 资源身份。环境 ID 只定位环境；每次操作都会核对项目和数据库身份。',
     parameters: {}, output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(_args, exec) {
-      return JSON.parse(JSON.stringify(await core.environments(actor(exec.agent))));
+      return JSON.parse(JSON.stringify(await core.environments(actor(exec.agent, exec.callId))));
     },
   }));
   ctx.tools.register(defineTool({
@@ -84,8 +108,47 @@ export function apply(ctx: Context, config: Config): void {
     },
     output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args, exec) {
-      return JSON.parse(JSON.stringify(await core.query(args, actor(exec.agent), exec.signal)));
+      return JSON.parse(JSON.stringify(await core.query(args, actor(exec.agent, exec.callId), exec.signal)));
     },
+  }));
+  const output = { schema: { type: 'json' as const }, render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: JSON.stringify(value) }] };
+  const environmentId = { type: 'string' as const, required: true as const, description: '当前项目获准的环境 ID' };
+  for (const kind of ['checkpoint', 'fork'] as const) {
+    ctx.tools.register(defineTool({
+      name: `stellane_${kind}`,
+      description: kind === 'checkpoint' ? '固定当前 Stello 环境已提交的数据状态，返回只读切面及实际来源位置。派生多个方案前先固定一次；临时表和未提交事务不继承。'
+        : '从固定只读切面派生一个可写 Stello 环境。兄弟环境应使用同一切面；返回新的独立环境 ID，后续 SQL 显式传此 ID。',
+      parameters: { environmentId, name: { type: 'string', required: true, description: '便于用户识别的新环境名称' } }, output,
+      async execute(args, exec) { return JSON.parse(JSON.stringify(await core.derive(kind, args, actor(exec.agent, exec.callId), exec.signal))); },
+    }));
+  }
+  ctx.tools.register(defineTool({
+    name: 'stellane_execute', description: '在 Stellane 派生的可写分支执行单条 DDL / DML / SELECT，作为一个事务提交并保存回执。来源库和固定切面禁止写入。事务控制、SET、CALL、多语句不支持。结果 unknown 时调用 stellane_reconcile_write 核对，禁止重放原 SQL。',
+    parameters: { environmentId, sql: { type: 'string', required: true, description: '单条 SQL，动态值使用 $1 参数' },
+      values: { type: 'array', items: { type: 'json' }, description: '可选标量参数值' } }, output,
+    async execute(args, exec) { return JSON.parse(JSON.stringify(await core.write(args, actor(exec.agent, exec.callId), exec.signal))); },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_deliver', description: '向祖先环境交付方案：固定当前可写环境，针对固定切面执行只读证据查询，并保存不可编辑的摘要、来源、结果与交付对象。交付后继续修改工作环境不会改变已交付结果。',
+    parameters: { environmentId, recipientEnvironmentId: { type: 'string', required: true, description: '接收结果的祖先环境 ID' },
+      summary: { type: 'string', required: true, description: '方案摘要与适用约束' },
+      sql: { type: 'string', required: true, description: '交付切面上的单条只读证据查询' } }, output,
+    async execute(args, exec) { return JSON.parse(JSON.stringify(await core.deliver(args, actor(exec.agent, exec.callId), exec.signal))); },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_results', description: '读取交付给指定环境的最近方案、固定来源和执行证据，用于父任务比较结果。',
+    parameters: { environmentId }, output,
+    async execute(args, exec) { return JSON.parse(JSON.stringify(await core.results(args.environmentId, actor(exec.agent, exec.callId)))); },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_reconcile_write', description: '只读取并核对原写入的事务回执；不重新执行 SQL。找不到回执时保留 unknown。',
+    parameters: { runId: { type: 'string', required: true, description: '待核实的原执行记录 ID' } }, output,
+    async execute(args, exec) { return JSON.parse(JSON.stringify(await core.reconcileRun(args.runId, actor(exec.agent, exec.callId), exec.signal))); },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_reconcile_branch', description: '只观察原分支派生票据的资源身份、创建标识和状态，不另建分支或刷新来源。',
+    parameters: { operationId: { type: 'string', required: true, description: '原派生操作记录 ID' } }, output,
+    async execute(args, exec) { return JSON.parse(JSON.stringify(await core.reconcileOperation(args.operationId, actor(exec.agent, exec.callId), exec.signal))); },
   }));
 }
 

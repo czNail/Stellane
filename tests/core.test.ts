@@ -53,6 +53,8 @@ test('Agent project identity fences environment discovery and SQL execution', as
     const allowed = await core.query({ environmentId: environment.id, sql: 'SELECT 1' }, { ...actor, projectPath: root });
     assert.equal(allowed.actor.id, 'agent-1');
     assert.equal(allowed.status, 'succeeded');
+    await assert.rejects(core.write({ environmentId: environment.id, sql: 'DELETE FROM demo_orders' }, { ...actor, projectPath: root }), /只能写入/);
+    await assert.rejects(core.derive('fork', { environmentId: environment.id, name: 'unsupported' }, { ...actor, projectPath: root }), /没有分支/);
   } finally { await core.close(); await rm(root, { recursive: true, force: true }); await rm(other, { recursive: true, force: true }); }
 });
 

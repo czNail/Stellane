@@ -2,19 +2,18 @@
 
 ## 当前版本
 
-第一阶段支持 Harness Web `0.2.2-rc.1`：
+支持 DeepSeek Harness Web `0.2.2-rc.1`，Core 运行在 Host 插件内。当前可用：
 
-- 在 Harness 设置页或 Stellane 面板保存连接配置、测试连接。
-- 登记绑定项目的实时、只读 PostgreSQL 环境。
-- 在面板执行查询，或准备一条 Harness 对话让 Agent 查询。
-- 通过 `stellane_environments` 和 `stellane_query` 访问当前 Agent 项目的环境。
-- 查看实际数据库目标、结果预览、工具卡片和本地执行历史；Host 重启后记录保留。
+- 普通 PostgreSQL 连接、实时只读环境、面板查询与 Agent 工具。
+- Stello 来源登记、固定切面、可写子分支、DDL / DML 事务与持久回执。
+- 环境来源树、实际资源身份、执行历史，以及面向祖先环境的固定结果交付。
+- 项目访问检查、同次调用去重、未知操作核对与 Host 重启后的记录恢复。
 
-分支派生、SQL 写入、计算释放、回收、应用事件驱动器和知识审核尚未实现。普通 PG 直连环境随原库变化。
+应用事件驱动、知识审核、计算释放、环境删除和完整容量测量按 PRODUCT.md 的后续阶段推进。普通 PG 直连随原库变化，分支能力由 Stello 提供。
 
 ## 构建与安装
 
-需要 Node.js 24.9+ 与 Corepack；包管理器固定为 pnpm 11.1.2。Host 和 Client 分开进行类型检查。
+需要 Node.js 24.9+、Corepack；包管理器固定为 pnpm 11.1.2。
 
 ```sh
 corepack pnpm install
@@ -22,74 +21,93 @@ corepack pnpm check
 dsh plugin --profile web add "$PWD"
 ```
 
-从仓库根目录安装。构建输出位于 `dist/`；安装以本地链接接入，不发布 npm 包。源码变更后重新构建并重启 Harness Host。本机服务可用 `systemctl --user restart dsh-web` 重启，再执行 `dsh-url` 获取当前地址。
+从仓库根目录安装，构建输出为 `dist/`，以本地链接接入。源码变更后重新构建并重启 Host。本机使用 `systemctl --user restart dsh-web`，再通过 `dsh-url` 获取访问地址。
 
-## 专用开发数据库
+## 开发数据库
+
+### 普通 PostgreSQL
 
 ```sh
 corepack pnpm dev:db
 corepack pnpm test:integration
-```
-
-脚本创建 `stellane-phase1-postgres` 容器和 `stellane-phase1-postgres-data` 数据卷，只绑定 `127.0.0.1` 的随机端口。只操作带 `com.stellane.owner=stellane-phase1` 标识的自有资源；同名资源不属于本项目时停止操作。
-
-连接配置位于 `.stellane-dev/connection.json`。示范表 `demo_orders` 包含 3 笔合计 360 件的虚构订单，`stellane_reader` 只有表读取权限。现有 Stello 测试实例不参与第一阶段验收。
-
-```sh
 corepack pnpm dev:db stop
 ```
 
-停止命令保留容器配置和数据卷，下次运行 `dev:db` 继续使用。脚本不自动删除持久数据。
+脚本创建 `stellane-phase1-postgres` 容器和 `stellane-phase1-postgres-data` 数据卷，只绑定 `127.0.0.1` 的随机端口。连接字段和密码引用位于 `.stellane-dev/connection.json`，读取角色只有示范表的 SELECT 权限。
 
-## 连接与状态
+### Stello
 
-连接字段包括项目绝对目录、数据库地址、端口、库名、用户、TLS 和密码引用。密码引用支持：
-
-- `env:VARIABLE_NAME`：从 Harness Host 的环境读取。
-- `file:/absolute/path`：读取仅当前用户可访问的密码文件，权限为 `600`，上限 8 KiB。
-
-连接配置只保存引用。建议使用只授权所需表的只读数据库角色；远程数据库可选择 TLS 并验证证书。配置保存为新的连接身份，已有环境继续绑定原连接。
-
-默认状态目录为 `~/.local/share/stellane`，SQLite 文件为 `state.sqlite`。单个 Harness Host 管理这套状态；可在插件配置中指定绝对路径 `stateDirectory`。项目、环境、SQL、参数、调用主体与有界结果预览保存在本地，目录权限为 `700`、数据库文件为 `600`。
-
-Agent 身份和项目目录取自 Harness 的可信执行上下文。环境 ID 用于定位，查询前另行核对项目归属。管理界面仅允许 Host 所有者访问；密码配置不作为 Agent 工具暴露。
-
-## 查询与失败处理
-
-- 查询在 PostgreSQL 只读事务内执行，使用扩展协议拒绝多语句；结果预览最多 200 行、128 KiB。
-- SQL 上限 16 KiB，最多 32 个标量参数；SQL 执行限时 5 秒，同一 Core 最多 4 个并发查询。
-- 每次调用记录独立环境与实际数据库目标，工具和面板共用 Core。
-- 取消时关闭数据库连接并记录中断。Host 重启将上次未完成的只读查询标为中断，保留记录供核对，不自动重放。
-- 面板显示最近 100 次执行；本地历史不随页面关闭删除。当前不提供历史清理和分支操作。
-
-## 代码与检查
-
-| 目录 | 职责 |
-| --- | --- |
-| `src/core` | 环境、项目访问检查和 SQLite 执行记录 |
-| `src/providers` | PostgreSQL 连接、凭据引用和只读执行 |
-| `src/host` | Harness 服务绑定、管理操作与 Agent 工具 |
-| `src/client` | 设置页、环境面板与工具卡片 |
-| `src/shared` | 数据结构、输入校验和 Host / Client 通信契约 |
-| `scripts` | 构建和专用开发数据库 |
-| `tests` | 持久化、项目隔离、并发与真实 SQL 验证 |
+需要 Linux、Docker，以及已经构建完成的 Stello PG14 安装目录。开发脚本参考 Stello 的产品部署入口，创建独立的 systemd 主机容器、RustFS 容器和内部网络。
 
 ```sh
-corepack pnpm typecheck
-corepack pnpm test
-corepack pnpm build
-corepack pnpm test:integration
+corepack pnpm dev:stello --source /path/to/Stello
+corepack pnpm test:stello
+corepack pnpm dev:stello stop
 ```
 
-浏览器验收：保存连接 → 测试连接 → 创建环境 → 统计 `demo_orders` → 点击“在对话中查询”并发送 → 核对工具卡片与面板中的 Agent 记录 → 重启 Host 后复查记录。Harness 设置中的 Stellane 连接页也需能读取相同配置。
+安装目录默认为 Stello 仓库的 `build-layout/pg14-current/install`，可用 `--prefix /path/to/install` 指定。首次启动复制一份构建产物到 `.stellane-dev/stello/install`，容器只读挂载这份副本。来源与构建状态记录在 `build.json`；开发副本不等同于经过发布验收的安装包。
 
-## 第一阶段验收记录
+自有资源为 `stellane-phase2-host`、`stellane-phase2-objects` 与 `stellane-phase2` 网络，均带 `com.stellane.owner=stellane-phase2` 标识。主机使用独立 PID、挂载、网络和 cgroup 命名空间，开发上限为 4 CPU、6 GiB 内存、8 个 Compute 槽位；每槽位 512 MiB 内存和 1 GiB 磁盘。
 
-2026-11-12，本机 Harness Web `0.2.2-rc.1`：
+登记字段保存在 `.stellane-dev/stello/provider.json`。两个开发库均包含 3 笔合计 360 件的虚构订单，表名为 `demo_orders`。脚本只操作所属标识匹配的资源；同名非自有资源会报错。现有 Stello 测试部署不参与验收，也不挂载其数据和运行目录。
 
-- 类型检查、构建、4 项 Core 测试和 2 项真实 PostgreSQL 集成测试通过；打包清单不含开发配置和密码。
-- 设置页、环境面板、对话入口与工具卡片可用。真实父代理与本地子代理分别在两个环境身份下查询，均返回 3 笔订单、360 件，执行记录分别为 `fb049a2f-91f3-4fd8-a23a-0f00f4058308`、`73a3a70d-7837-4b85-ac8c-76497bb333b7`。
-- 两个环境共用专用开发库，验证调用身份与环境定位；分支继承与写入隔离由第二阶段验证。
-- Host 重启后连接、环境和执行记录保留。
+停止命令保留容器、数据与凭据，下次启动继续使用；脚本不自动删除持久数据。集成测试只回收自身创建且身份仍匹配的分支，保留开发基线。
 
-验收中，Harness 在子代理完成后的模型续答出现一次 HTTP 404（`PI_AI_ERROR`）；父子两次 Stellane 查询均已成功，面板记录完整。此现象属于尚待复核的宿主模型链路，不计作 Stellane SQL 失败。
+## 使用分支与交付
+
+1. 在连接页登记 Stello 客户端配置文件、项目目录和 `database/branch` 来源。来源在 Stellane 中保持只读。
+2. 选择来源，填写切面名称，点击“固定当前状态”。面板显示实际固定位置与资源身份。
+3. 从固定切面“派生可写环境”。在工作环境提交单条 DDL / DML，保存修改、任务笔记或中间结果表。
+4. 再固定工作状态，从同一切面派生多个方案。父环境之后的修改不改变该切面，兄弟分支各自修改。
+5. 在可写环境展开“交付方案”，选择祖先接收环境，填写摘要和只读证据 SQL。Stellane 固定本次状态，并在固定结果上执行查询。
+6. 接收环境显示已交付方案、结果预览和证据引用。继续修改工作分支不会改变交付结果；固定结果也可继续派生。
+
+“执行查询”始终只读；“提交写入”仅在 Stellane 派生的可写分支显示。数据库中的已提交持久状态随分支继承，临时表、未提交事务和外部文件不继承。
+
+Agent 工具：
+
+| 工具 | 用途 |
+| --- | --- |
+| `stellane_environments` / `stellane_query` | 查找当前项目环境，执行只读查询 |
+| `stellane_checkpoint` / `stellane_fork` | 固定状态，从固定切面派生可写环境 |
+| `stellane_execute` | 单条 SQL 作为事务提交，保存回执 |
+| `stellane_deliver` / `stellane_results` | 交付固定方案，读取接收环境最近 3 个结果 |
+| `stellane_reconcile_write` / `stellane_reconcile_branch` | 核对原写入回执或原派生资源，不重放操作 |
+
+## 凭据、权限与状态
+
+普通 PG 密码引用支持 `env:VARIABLE_NAME` 和 `file:/absolute/path`。文件须为仅当前用户可访问的普通文件，权限 `600`，上限 8 KiB。连接只保存引用；修改配置生成新的连接身份，既有环境继续使用原绑定。
+
+Stello 使用 `stello context export` 导出的客户端配置，包含 HTTPS 管理入口、CA 路径与令牌文件引用；相对引用以配置文件所在目录解析。创建分支需要 Stello 的可写管理授权。管理令牌与 SQL 凭据仅由 Host 使用，HTTPS 和 SQL 均验证服务器证书。SQLite 不保存令牌、密码或私钥正文。
+
+Agent 身份、调用 ID 与项目目录取自 Harness 执行上下文。Core 核对项目归属和读写能力；SQL 角色权限由数据库控制。管理界面仅限 Host 所有者。普通 PG、外部来源和固定切面禁止通过写入工具修改，只有本插件派生的可写分支可以提交写入。
+
+Stello 每次连接都核对服务、槽位、代次和资源 ID；同名重建不能接替旧环境。派生记录保存原准入正文、创建标识、父身份与实际固定位置，不把数据库名称作为持久身份。
+
+默认本地状态为 `~/.local/share/stellane/state.sqlite`，目录权限 `700`、文件 `600`；可在插件中配置绝对路径 `stateDirectory`。单个 Host 管理这套状态。环境、主体、SQL、参数、来源、结果预览和交付记录保存在本地；面板显示最近 100 次执行。
+
+## 限制与失败处理
+
+- 单条 SQL 上限 16 KiB，最多 32 个标量参数；预览最多 200 行、128 KiB。只读语句限时 5 秒，写入事务中的语句限时 30 秒。
+- 每个 Core 最多 4 个并发操作；每项目最多 16 个环境，包含待核实派生。单个环境的写入和状态固定互斥；同一数据库的派生准入串行，兄弟环境 SQL 可并行。
+- 写入使用扩展协议拒绝多语句，限定 SELECT / WITH / CREATE / ALTER / DROP / INSERT / UPDATE / DELETE / TRUNCATE；事务控制、SET、CALL 不受支持。`stellane_internal` 是插件维护回执的保留命名空间，业务 SQL 不应修改。
+- 业务修改与回执在同一事务提交。回执绑定环境、调用、输入摘要和有界结果。Harness 同一调用 ID、界面同一请求 ID 返回原记录，改变原参数会被拒绝。
+- 已确认回滚标为失败；提交结果无法确认时标为未知。取消时关闭连接。重启将未完成写入和派生标为待核实，只读查询标为中断。
+- 核对写入只读取原回执，找到匹配回执后确认成功；找不到时继续保留未知。核对派生只观察原身份和创建标识。两者均不自动重放。
+- 交付记录引用固定分支和该分支上的证据查询。工作环境后续修改不更新交付；重新交付产生新结果。当前结果预览有上界，完整业务明细仍在对应数据库中。
+
+## 检查与验收
+
+```sh
+corepack pnpm check
+corepack pnpm test:integration
+corepack pnpm test:stello
+```
+
+`check` 包含 Host / Client 类型检查、4 项 Core 测试和构建。普通 PG 的 2 项集成测试覆盖真实查询、参数、预览、只读拒绝和取消。
+
+Stello 集成测试在新建开发部署上运行，需为完整场景保留 8 个 Compute 槽位。它经过真实管理 API 与 SQL：继承父修改和持久表、并发兄弟写入、固定结果不随工作状态变化、嵌套派生、项目与资源身份拒绝、事务逃逸拒绝，以及重启后通过原回执确认提交且不重放 SQL。报告位于 `.stellane-dev/stello/integration-report.json`。
+
+浏览器验收覆盖来源登记、固定与派生、面板写入、真实父子 Agent 调用、工具卡片、方案交付，以及 Host 重启后的结果复查。
+
+本机验收中，真实父代理将订单 1 调整为 130 并固定状态；子代理验证继承值后提交采购方案 200，另一分支提交调货方案 300，业务基线保持 120。采购方案由 Agent 交付，调货方案由面板交付，父环境可查看两份固定结果。
