@@ -1,0 +1,36 @@
+import { z } from 'zod';
+import { createTypertRemoteInfo } from '@deepseek-ai/dsh-typert-protocol/remote-info';
+import type { TypertRemoteSpec } from '@deepseek-ai/dsh-typert-protocol';
+import { connectionInput, environmentInput, queryInput } from './models.ts';
+import type { Connection, DatabaseTarget, Environment, Run, Snapshot } from './models.ts';
+
+export const PACKAGE = '@stellane/harness-plugin';
+export const requestSchemas = {
+  snapshot: z.strictObject({}),
+  saveConnection: connectionInput,
+  probe: z.strictObject({ connectionId: z.string().uuid() }),
+  createEnvironment: environmentInput,
+  prepareConversation: z.strictObject({ environmentId: z.string().uuid() }),
+  query: queryInput,
+};
+export type Operation = keyof typeof requestSchemas;
+export type Requests = { [K in Operation]: z.input<(typeof requestSchemas)[K]> };
+export interface Responses {
+  snapshot: Snapshot; saveConnection: Connection; probe: DatabaseTarget;
+  createEnvironment: Environment; query: Run;
+  prepareConversation: { workspaceId: string };
+}
+export type Reply<T> = { success: true; value: T } | { success: false; error: string };
+
+// One explicit contract is shared by the Host registry and browser mount.
+// No custom HTTP route or alternate authentication carrier is introduced.
+const methods = Object.fromEntries(Object.entries(requestSchemas).map(([name, schema]) => {
+  const codec = { mode: 'strict' as const, typeSymbol: `${name}Input`, create: () => schema };
+  return [`stellane/${name}`, {
+    service: 'stellane', invocation: { kind: 'direct' as const },
+    parameters: [{ name: 'input', source: 'json' as const, codec, strictCodec: codec }],
+    cancellation: { parameter: 'signal' as const },
+    result: { mode: 'strict' as const, typeSymbol: `${name}Reply`, create: () => z.unknown() },
+  }];
+})) as TypertRemoteSpec['methods'];
+export const remoteInfo = createTypertRemoteInfo({ package: PACKAGE, methods }, z);

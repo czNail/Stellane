@@ -6,9 +6,27 @@ Stellane 让智能应用和子代理从已有业务或父任务状态出发，�
 
 第一版以 **DeepSeek Harness 本地插件**交付。用户在 Harness 中配置资源、提出任务，并通过内嵌面板查看应用、任务、环境和结果。Stellane Core 由 Harness Host 插件加载，管理数据环境与资源生命周期。
 
-项目处于产品设计阶段，尚未实现功能或运行基准。以下描述首版目标。
+第一阶段已实现连接配置、实时直连环境、只读查询、Agent 工具、工具卡片与本地执行记录。分支继承、写入、资源回收和完整业务演示按[产品规划](PRODUCT.md)继续开发。
 
-## 怎样使用
+## 本地开发与试用
+
+使用 Node.js 24.9+、Corepack 和 DeepSeek Harness `0.2.2-rc.1`，在仓库根目录执行：
+
+```sh
+corepack pnpm install
+corepack pnpm check
+corepack pnpm dev:db
+corepack pnpm test:integration
+dsh plugin --profile web add "$PWD"
+```
+
+重启 Harness Host，执行 `dsh-url` 打开 Web 界面。侧栏的 **Stellane** 提供环境与查询面板，Harness 设置中也有 **Stellane** 连接页。
+
+`dev:db` 创建带本项目标识的独立 PostgreSQL 容器、数据卷和随机本地端口，打印连接字段与密码引用，配置也保存在 `.stellane-dev/connection.json`。它不使用现有 Stello 实例。开发配置、密码和构建产物不纳入 Git。
+
+在连接页保存这些字段、测试连接，再创建环境。可以直接执行 SQL，也可点击“在对话中查询”，检查提示词后发送给 Agent。详细配置、测试与运行限制见[开发说明](DEVELOPMENT.md)。
+
+## 首版使用流程
 
 1. 安装插件，在设置页登记项目、数据库、分支提供方、凭据引用和资源限制。
 2. 在对话中提出目标，或在面板中启动示范应用，由业务事件触发 Agent 任务。
