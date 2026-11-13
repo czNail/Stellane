@@ -52,8 +52,20 @@ test('real Stello inheritance, sibling isolation, fixed delivery and unknown-wri
     assert.equal(changed.preview?.affectedRows, 1);
     await write(parent, 'CREATE TABLE task_notes (note text NOT NULL)');
     await write(parent, "INSERT INTO task_notes VALUES ('父任务已调查')");
+    const semanticContext = await core.context({ environmentId: parent.id }, owner);
+    await core.importCatalog({ environmentId: parent.id, baseContextId: semanticContext.context.id, requestId: randomUUID(),
+      document: { source: { name: 'Generic fixture dictionary' }, entries: [{ key: 'sample.value', title: 'Sample value', kind: 'description',
+        content: 'The value field is a numeric measurement.', targets: [{ schema: 'public', table: 'sample_data', columns: ['value'] }] }] } }, owner);
     const cut = await derive('checkpoint', parent, 'parent-cut');
+    const fixedContext = await core.context({ environmentId: cut.id, query: 'Sample value' }, owner);
+    assert.equal(fixedContext.context.state.dataVersion.kind, 'fixed-position');
+    assert.equal(fixedContext.context.state.dataVersion.position, cut.stello!.forkLsn);
+    assert.equal(fixedContext.definitions.length, 1);
     const [a, b] = await Promise.all([derive('fork', cut, 'child-a'), derive('fork', cut, 'child-b')]);
+    const branchContext = await core.context({ environmentId: a.id, query: 'Sample value' }, owner);
+    assert.equal(branchContext.context.state.dataVersion.kind, 'observation');
+    assert.equal(branchContext.context.state.dataVersion.position, undefined);
+    assert.equal(branchContext.definitions[0]?.version, 1);
     assert.equal((await query(a)).preview?.rows[0]?.value, 121);
     assert.deepEqual((await query(b, 'SELECT note FROM task_notes')).preview?.rows, [{ note: '父任务已调查' }]);
     await write(parent, 'UPDATE sample_data SET value=122 WHERE id=1');

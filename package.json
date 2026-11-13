@@ -41,7 +41,7 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "test": "node --test --experimental-strip-types tests/core.test.ts",
-    "test:integration": "node --test --experimental-strip-types tests/postgres.test.ts",
+    "test:integration": "node --test --experimental-strip-types tests/postgres.test.ts tests/catalog.test.ts",
     "test:stello": "node --test --experimental-strip-types tests/stello.test.ts",
     "dev:db": "node scripts/dev-db.mjs",
     "dev:stello": "python3 -B scripts/dev-stello.py",

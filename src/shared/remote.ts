@@ -3,6 +3,8 @@ import { createTypertRemoteInfo } from '@deepseek-ai/dsh-typert-protocol/remote-
 import type { TypertRemoteSpec } from '@deepseek-ai/dsh-typert-protocol';
 import { connectionInput, deliverInput, deriveInput, environmentInput, queryInput, stelloInput } from './models.ts';
 import type { BranchOperation, Connection, DatabaseTarget, DeliveredResult, Environment, Run, Snapshot } from './models.ts';
+import { contextInput, importCatalogInput } from './context-models.ts';
+import type { CatalogView, ContextResult, SemanticDefinition } from './context-models.ts';
 
 export const PACKAGE = '@stellane/harness-plugin';
 export const requestSchemas = {
@@ -17,6 +19,9 @@ export const requestSchemas = {
   results: z.strictObject({ environmentId: z.string().uuid() }),
   reconcileRun: z.strictObject({ runId: z.string().uuid() }),
   reconcileOperation: z.strictObject({ operationId: z.string().uuid() }),
+  context: contextInput,
+  catalogView: z.strictObject({ environmentId: z.string().uuid() }),
+  importCatalog: importCatalogInput,
 };
 export type Operation = keyof typeof requestSchemas;
 export type Requests = { [K in Operation]: z.input<(typeof requestSchemas)[K]> };
@@ -26,6 +31,7 @@ export interface Responses {
   prepareConversation: { workspaceId: string };
   saveStello: Environment; checkpoint: Environment; fork: Environment; execute: Run;
   deliver: DeliveredResult; results: DeliveredResult[]; reconcileRun: Run; reconcileOperation: BranchOperation;
+  context: ContextResult; catalogView: CatalogView; importCatalog: SemanticDefinition[];
 }
 export type Reply<T> = { success: true; value: T } | { success: false; error: string };
 

@@ -2,8 +2,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BranchOperation, Connection, Delivery, Environment, Run, StelloSource } from '../shared/models.ts';
+import type { CatalogImport, ContextRecord, SemanticDefinition } from '../shared/context-models.ts';
 
-interface Records { connections: Connection; environments: Environment; runs: Run; providers: StelloSource; operations: BranchOperation; deliveries: Delivery }
+interface Records { connections: Connection; environments: Environment; runs: Run; providers: StelloSource; operations: BranchOperation; deliveries: Delivery;
+  contexts: ContextRecord; definitions: SemanticDefinition; catalogImports: CatalogImport }
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -20,7 +22,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      PRAGMA user_version=1;`);
+      CREATE TABLE IF NOT EXISTS contexts (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS definitions (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS definitions_scope ON definitions(json_extract(body,'$.projectPath'),json_extract(body,'$.dataSourceId'));
+      CREATE TABLE IF NOT EXISTS catalogImports (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      PRAGMA user_version=2;`);
     const unfinished = this.db.prepare("SELECT body FROM runs WHERE json_extract(body, '$.status') = 'running'").all();
     for (const row of unfinished) {
       const run = JSON.parse(row.body as string) as Run;
@@ -54,6 +60,15 @@ export class Store {
       WHERE json_extract(o.body, '$.environment.projectPath') = ? AND json_extract(o.body, '$.status') IN ('pending','unknown')
       AND NOT EXISTS (SELECT 1 FROM environments e WHERE e.id = json_extract(o.body, '$.environment.id'))`).get(projectPath)!;
     return Number(environments.n) + Number(pending.n);
+  }
+  definitions(projectPath: string, dataSourceId: string): SemanticDefinition[] {
+    return this.db.prepare("SELECT body FROM definitions WHERE json_extract(body,'$.projectPath')=? AND json_extract(body,'$.dataSourceId')=? ORDER BY rowid DESC")
+      .all(projectPath,dataSourceId).map(row=>JSON.parse(row.body as string));
+  }
+  transaction<T>(work: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    try { const result=work(); this.db.exec('COMMIT'); return result; }
+    catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   put<K extends keyof Records>(table: K, value: Records[K]): void {
     this.db.prepare(`INSERT INTO ${table} (id, body) VALUES (?, ?)

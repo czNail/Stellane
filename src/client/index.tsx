@@ -11,12 +11,13 @@ import type { TypertClientRemote } from '@deepseek-ai/dsh-typert-protocol';
 import { remoteInfo, type Operation, type Reply, type Requests, type Responses } from '../shared/remote.ts';
 import type { ConnectionInput, Environment, QueryPreview, Run, Snapshot, StelloInput } from '../shared/models.ts';
 import styles from './styles.css';
+import { CatalogPanel } from './catalog.tsx';
 
-type Api = <K extends Operation>(name: K, input: Requests[K]) => Promise<Responses[K]>;
+export type Api = <K extends Operation>(name: K, input: Requests[K]) => Promise<Responses[K]>;
 const empty: Snapshot = { connections: [], environments: [], runs: [], providers: [], operations: [], deliveries: [] };
 const statusText = { running: '执行中', succeeded: '已完成', failed: '失败', interrupted: '已中断', unknown: '待核实' };
 const toolLabels: Record<string, string> = {
-  stellane_query: '查询数据', stellane_environments: '可用环境', stellane_execute: '提交写入',
+  stellane_context: '语义上下文', stellane_query: '查询数据', stellane_environments: '可用环境', stellane_execute: '提交写入',
   stellane_checkpoint: '固定状态', stellane_fork: '派生环境', stellane_deliver: '交付方案',
   stellane_results: '收到的结果', stellane_reconcile_write: '核对写入', stellane_reconcile_branch: '核对派生',
 };
@@ -154,7 +155,7 @@ function PreviewTable({ preview, maxRows = 200 }: { preview: QueryPreview; maxRo
 
 function Panel({ api, openConversation }: { api: Api; openConversation: (workspaceId: string, prompt: string) => void }) {
   const { data, error, refresh } = useSnapshot(api);
-  const [view, setView] = useState<'environments' | 'connections'>('environments');
+  const [view, setView] = useState<'environments' | 'catalog' | 'connections'>('environments');
   const [selected, setSelected] = useState('');
   const [selectedRun, setSelectedRun] = useState('');
   const [sql, setSql] = useState('SELECT current_database() AS database, current_user AS role;');
@@ -168,7 +169,7 @@ function Panel({ api, openConversation }: { api: Api; openConversation: (workspa
   const [actionError, setActionError] = useState('');
   const environment = data.environments.find(item => item.id === selected) ?? data.environments[0];
   const connection = data.connections.find(item => item.id === environment?.connectionId);
-  const runs = data.runs.filter(run => run.environmentId === environment?.id);
+  const runs = data.runs.filter(run => run.environmentId === environment?.id && run.purpose !== 'context');
   const run = runs.find(item => item.id === selectedRun) ?? runs[0];
   const ancestors: Environment[] = [];
   let parentId = environment?.parentEnvironmentId;
@@ -233,20 +234,21 @@ function Panel({ api, openConversation }: { api: Api; openConversation: (workspa
     setActionError('');
     try {
       const { workspaceId } = await api('prepareConversation', { environmentId: environment.id });
-      openConversation(workspaceId, `请使用 Stellane 工具查询数据库：先调用 stellane_environments 确认可用环境，再用 stellane_query 在环境 ${environment.id} 中执行以下只读 SQL。请根据实际结果回答，附必要来源，无需讲解工具调用方法。\n\n${sql}`);
+      openConversation(workspaceId, `请使用 Stellane 工具查询数据库：先调用 stellane_environments 确认可用环境，调用 stellane_context 获取表结构和相关业务定义，再用 stellane_query 在环境 ${environment.id} 中执行以下只读 SQL。请根据实际结果回答，附必要来源，无需讲解工具调用方法。\n\n${sql}`);
     } catch (error) { setActionError(message(error)); }
   }
   return <main className="st-app">
     <header className="st-header"><div><p className="st-eyebrow">STELLANE</p><h1>Agent Data Context</h1>
-      <p className="st-muted">连接数据，固定状态，在独立分支中探索并保存证据。</p></div>
+      <p className="st-muted">为 SQL Agent 提供业务知识、数据环境与查询证据。</p></div>
       <button className="st-button" onClick={() => void refresh().catch(error => setActionError(message(error)))}>刷新</button>
     </header>
     <nav className="st-tabs" aria-label="Stellane 导航">
+      <button aria-pressed={view === 'catalog'} onClick={() => setView('catalog')}>语义目录</button>
       <button aria-pressed={view === 'environments'} onClick={() => setView('environments')}>环境与查询 <span>{data.environments.length}</span></button>
       <button aria-pressed={view === 'connections'} onClick={() => setView('connections')}>连接配置 <span>{data.connections.length + data.providers.length}</span></button>
     </nav>
     {(error || actionError) && <p role="alert" className="st-error">{actionError || error}</p>}
-    {view === 'connections' ? <Connections api={api} data={data} refresh={refresh} /> : <>
+    {view === 'catalog' ? <CatalogPanel api={api} environments={data.environments} environmentId={environment?.id} onSelect={setSelected} openConversation={openConversation} onSetup={() => setView(data.connections.length + data.providers.length ? 'environments' : 'connections')} /> : view === 'connections' ? <Connections api={api} data={data} refresh={refresh} /> : <>
       {data.connections.length + data.providers.length === 0 ? <section className="st-empty"><h2>连接第一个数据资源</h2><p className="st-muted">登记 PostgreSQL 连接或 Stello 分支来源，开始使用数据环境。</p>
         <button className="st-button st-primary" onClick={() => setView('connections')}>添加连接</button></section> : <>
         {data.connections.length > 0 && <form className="st-create" onSubmit={event => void create(event)}>

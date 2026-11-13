@@ -10,8 +10,9 @@ Core 在 Harness Host 内运行，支持 DeepSeek Harness Web `0.2.2-rc.1`：
 - Stello 来源登记、固定切面、可写分支、DDL / DML 事务与持久回执。
 - 环境来源树、实际资源身份、执行历史和固定结果交付。
 - 项目访问检查、同次调用去重、未知操作核对与重启后的记录恢复。
+- 语义目录、业务说明表单与 JSON 批量导入、定义版本与历史、结构依赖检查，以及 `stellane_context` 检索。
 
-Semantic Catalog、Agentic Memory、记忆自动验证与发布和跨分支知识有效性尚待实现。执行历史与结果预览是证据基础，当前不作为已验证的共享记忆。
+Semantic Catalog 已提供初版。Agentic Memory、记忆自动验证与发布和数据内容依赖验证尚待实现。执行历史与结果预览是证据基础，当前不作为已验证的共享记忆。
 
 ## 构建与安装
 
@@ -77,11 +78,47 @@ corepack pnpm dev:stello stop --instance context-check
 
 | 工具 | 用途 |
 | --- | --- |
+| `stellane_context` | 读取当前数据状态下的相关元数据、业务定义、来源和版本变化 |
 | `stellane_environments` / `stellane_query` | 当前项目环境与只读查询 |
 | `stellane_checkpoint` / `stellane_fork` | 固定状态、派生可写环境 |
 | `stellane_execute` | 单条 SQL 事务与回执 |
 | `stellane_deliver` / `stellane_results` | 固定结果交付与读取 |
 | `stellane_reconcile_write` / `stellane_reconcile_branch` | 观察原回执或原分支，不重放操作 |
+
+## 语义目录与上下文
+
+在面板选择“语义目录”，按“选择数据 → 补充业务说明 → 向 Agent 提问”使用。选择环境后自动读取表结构；“添加业务说明”可填写名称、口径、适用表和来源，字段范围与 SQL 示例选填。“编辑说明”自动携带当前版本条件，保存时保留历史。
+
+“预览参考资料”展示与 Agent 相同的检索结果；“去对话中提问”打开带有问题的新对话，发送后才执行查询。数据来源、结构指纹和校验记录可按需展开。
+
+已有业务词典可通过“批量导入 JSON”读取本地文件或粘贴以下格式：
+
+```json
+{
+  "source": { "name": "指标词典", "uri": "docs/metrics.json" },
+  "entries": [{
+    "key": "sample.total",
+    "title": "总指标值",
+    "kind": "metric",
+    "content": "按 group_name 对 value 求和，单位为点。",
+    "targets": [{ "schema": "public", "table": "sample_data", "columns": ["value", "group_name"] }],
+    "sql": "SELECT group_name, SUM(value) FROM public.sample_data GROUP BY group_name",
+    "expectedVersion": 0
+  }]
+}
+```
+
+`kind` 支持 `description`、`metric`、`relationship` 和 `sql-example`。`uri` 是来源引用，不自动读取外部文件或网址。首次导入版本条件为 0，更新填写当前版本号；同次请求去重，版本冲突或结构变化会拒绝更新，整批文档在 SQLite 事务内保存。
+
+每次 `stellane_context` 调用都在一条只读 SQL 中读取当前 SQL 角色有整表 SELECT 权限的用户对象，包括字段、默认值、生成与身份属性、注释、约束和视图定义。结构变化、注释变化、对象重建或依赖不可见会排除对应定义；新版本也会替代旧版本，不回退到旧定义。检索使用关键词和中文相邻双字匹配，相关外键目标一并纳入有界结果。
+
+普通 PG 以连接登记及实际目标作为来源依据；这不是不可替换的物理实例证明。Stello 额外核对原资源身份和来源，固定切面返回固定位置，可写分支的 forkLsn 仅表示起始来源。结构指纹与 MVCC 观测不代表数据内容版本。普通 PG 同连接环境、Stello 同来源分支可以共享结构仍匹配的定义；新连接登记默认隔离。
+
+返回值包含上下文 ID、实际目标、观测时间、结构与目录指纹、来源定义、被排除版本及原因、元数据执行记录。上下文保存本次问题和选中的定义版本、对象 ID，便于追溯 Agent 实际获得的资料。传入同环境的 `previousContextId` 可比较结构和定义是否变化。完整历史和导入仅供用户访问，Agent 读取当前适用内容；SQL 示例不会自动执行。
+
+元数据读取保存为 `purpose: context` 的执行证据，不占用面板的业务 SQL 查询历史。
+
+初版上限：64 个可读对象，每对象 256 个字段、128 条约束，元数据响应 128 KiB；每文档 64 KiB / 16 条定义，每数据源保留最多 128 个定义版本（含历史），单次检索最多返回 16 个对象及 16 条定义。超限时明确失败，不把部分元数据当作完整目录。
 
 ## 身份、凭据与失败处理
 
@@ -110,6 +147,6 @@ corepack pnpm test:integration
 corepack pnpm test:stello
 ```
 
-`check` 包含 Host / Client 类型检查、Core 测试和构建。PG 集成测试覆盖真实 SQL、参数、预览限制、只读拒绝和取消。Stello 集成测试验证持久状态继承、并发兄弟隔离、固定结果、嵌套派生、项目与资源身份检查、事务控制拒绝，以及重启后通过回执确认提交而不重放 SQL。
+`check` 包含 Host / Client 类型检查、Core 测试和构建。PG 集成测试覆盖真实 SQL、参数、预览限制、只读拒绝和取消。语义目录集成测试覆盖元数据与权限、自然语言关键词检索、定义更新与并发版本检查、数据变化和结构变化的区别、失效排除及重启保留。Stello 集成测试验证固定位置、分支观测和语义定义继承，以及持久状态继承、并发兄弟隔离、固定结果、嵌套派生、项目与资源身份检查、事务控制拒绝，以及重启后通过回执确认提交而不重放 SQL。
 
-Stello 测试报告保存在所选 `provider.json` 同目录的 `integration-report.json`。真实 Agent 与浏览器验收验证通用工具调用和界面；语义与记忆能力的验收按产品设计逐步加入。
+Stello 测试报告保存在所选 `provider.json` 同目录的 `integration-report.json`。真实 Agent 与浏览器验收验证通用工具调用和界面；自动记忆能力的验收按产品设计逐步加入。
