@@ -59,7 +59,7 @@ export interface Run {
   id: string; environmentId: string; connectionId?: string; projectPath: string;
   actor: Actor; sql: string; values: QueryInput['values'];
   kind?: 'query' | 'execute'; digest?: string;
-  purpose?: 'context';
+  purpose?: 'context' | 'knowledge';
   status: 'running' | 'succeeded' | 'failed' | 'interrupted' | 'unknown';
   startedAt: string; finishedAt?: string; durationMs?: number;
   target?: DatabaseTarget; preview?: QueryPreview; error?: string;

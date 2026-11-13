@@ -8,6 +8,7 @@ import { StelloProvider } from '../providers/stello.ts';
 import { Store } from './store.ts';
 import { SemanticCatalog } from './catalog.ts';
 import type { CatalogView, ContextResult, SemanticDefinition } from '../shared/context-models.ts';
+import type { LearnResult } from '../shared/knowledge-models.ts';
 
 function invocationId(actor: Actor, operation: string): string {
   if (!actor.callId) return randomUUID();
@@ -28,7 +29,7 @@ export class StellaneCore {
   constructor(directory: string, provider: QueryProvider = new PostgresProvider(), branches: StelloProvider = new StelloProvider()) {
     this.provider = provider; this.branches = branches; this.store = new Store(directory);
     this.catalog = new SemanticCatalog(this.store,id=>this.environment(id),
-      (environmentId,sql,actor,signal)=>this.run(queryInput.parse({environmentId,sql}),actor,signal,false,'context'));
+      (environmentId, sql, actor, signal, purpose) => this.run(queryInput.parse({ environmentId, sql }), actor, signal, false, purpose));
   }
   snapshot(): Snapshot {
     return { connections: this.store.list('connections'), environments: this.store.list('environments'),
@@ -120,12 +121,15 @@ export class StellaneCore {
   importCatalog(value: unknown, actor: Actor, signal?: AbortSignal): Promise<SemanticDefinition[]> {
     return this.track(signal=>this.catalog.import(value,actor,signal),signal);
   }
+  learn(value: unknown, actor: Actor, signal?: AbortSignal): Promise<LearnResult> {
+    return this.track(signal => this.catalog.learn(value, actor, signal), signal);
+  }
   private lock(id: string): () => void {
     if (this.modifying.has(id)) throw new Error('这个环境正在写入或固定状态，请待当前操作结束。');
     this.modifying.add(id);
     return () => this.modifying.delete(id);
   }
-  private async run(input: QueryInput, actor: Actor, signal: AbortSignal, write: boolean, purpose?: 'context'): Promise<Run> {
+  private async run(input: QueryInput, actor: Actor, signal: AbortSignal, write: boolean, purpose?: Run['purpose']): Promise<Run> {
     const environment = await this.authorize(input.environmentId, actor);
     if (write && (environment.access !== 'read-write' || !environment.stello?.managed)) {
       throw new Error('只能写入 Stellane 派生的可写分支；来源库、固定切面和普通 PG 环境保持只读。');

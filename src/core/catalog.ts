@@ -1,19 +1,16 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Store } from './store.ts';
 import { catalogSql } from './catalog-sql.ts';
 import { contextInput, importCatalogInput, metadataSchema } from '../shared/context-models.ts';
-import type { CatalogView, ContextRecord, ContextResult, DefinitionStatus, SemanticDefinition } from '../shared/context-models.ts';
+import type { CatalogView, ContextRecord, ContextResult, DatabaseMetadata, DefinitionStatus, SemanticDefinition } from '../shared/context-models.ts';
+import { learnInput, type LearnResult } from '../shared/knowledge-models.ts';
 import type { Actor, Environment, Run } from '../shared/models.ts';
+import { fingerprint as hash, relevance, searchTerms } from './context-utils.ts';
+import { KnowledgeMemory, knowledgeTables, tableKey } from './knowledge.ts';
 
-// Canonicalize JSONB key order before hashing; array order comes from catalog SQL.
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a],[b]) => a.localeCompare(b)).map(([key,item]) => [key,canonical(item)]));
-  return value;
-}
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 const objectKey = (schema: string, table: string) => JSON.stringify([schema,table]);
-type ReadMetadata = (environmentId: string, sql: string, actor: Actor, signal: AbortSignal) => Promise<Run>;
+type ReadMetadata = (environmentId: string, sql: string, actor: Actor, signal: AbortSignal, purpose: 'context' | 'knowledge') => Promise<Run>;
+type Observation = Omit<CatalogView, 'knowledge'> & { metadata: DatabaseMetadata };
 const notes = ['元数据只覆盖当前 SQL 角色拥有整表 SELECT 权限的用户对象。',
   '结构指纹不代表数据内容版本。实时库与可写分支仅记录本次观测，分支 forkLsn 是来源位置。',
   '业务说明来自导入文档；适用表示对象结构匹配。SQL 示例作为资料返回，未自动执行。'];
@@ -22,10 +19,16 @@ export class SemanticCatalog {
   private readonly store: Store;
   private readonly environment: (id: string) => Environment;
   private readonly read: ReadMetadata;
-  constructor(store: Store, environment: (id: string) => Environment, read: ReadMetadata) { this.store=store; this.environment=environment; this.read=read; }
-  private async observe(environmentId: string, actor: Actor, signal: AbortSignal): Promise<CatalogView> {
+  private readonly memory: KnowledgeMemory;
+  constructor(store: Store, environment: (id: string) => Environment, read: ReadMetadata) {
+    this.store = store;
+    this.environment = environment;
+    this.read = read;
+    this.memory = new KnowledgeMemory(store);
+  }
+  private async observe(environmentId: string, actor: Actor, signal: AbortSignal): Promise<Observation> {
     // Authorization and verified branch connection happen in Core before any saved definitions are read.
-    const run = await this.read(environmentId,catalogSql,actor,signal);
+    const run = await this.read(environmentId, catalogSql, actor, signal, 'context');
     if (run.status !== 'succeeded') throw new Error(`元数据读取失败：${run.error ?? run.status} 执行记录：${run.id}`);
     const parsed = metadataSchema.safeParse(run.preview?.rows[0]?.metadata);
     if (!parsed.success || run.preview?.truncated || !run.target) throw new Error('元数据不完整或超过上限（64 个对象、每对象 256 个字段、128 KiB），未生成上下文。');
@@ -53,32 +56,48 @@ export class SemanticCatalog {
       state:{ environmentId,dataSourceId,mode:environment.mode,target:run.target,databaseOid:metadata.databaseOid,
         observedAt:run.finishedAt!,branch:run.branch,identityBasis:environment.stello?'stello-resource':'registration-and-target',
         dataVersion:environment.mode==='fixed' && run.branch ? {kind:'fixed-position',snapshot:metadata.snapshot,position:run.branch.forkLsn} : {kind:'observation',snapshot:metadata.snapshot} } };
-    this.store.put('contexts',context); return { context,relations:metadata.relations,versions,notes };
+    this.store.put('contexts',context); return { context,relations:metadata.relations,versions,notes,metadata };
   }
-  view(environmentId: string,actor: Actor,signal: AbortSignal): Promise<CatalogView> {
-    if (actor.kind!=='user') return Promise.reject(new Error('完整目录与历史仅供用户查看。'));
-    return this.observe(environmentId,actor,signal);
+  async view(environmentId: string, actor: Actor, signal: AbortSignal): Promise<CatalogView> {
+    if (actor.kind !== 'user') throw new Error('完整目录与历史仅供用户查看。');
+    const { metadata, ...view } = await this.observe(environmentId, actor, signal);
+    return { ...view, knowledge: this.memory.view(view.context, metadata) };
+  }
+  async learn(value: unknown, actor: Actor, signal: AbortSignal): Promise<LearnResult> {
+    const { environmentId, claim } = learnInput.parse(value);
+    const view = await this.observe(environmentId, actor, signal);
+    return this.memory.learn(claim, view.context, view.metadata,
+      (sql, signal) => this.read(environmentId, sql, actor, signal, 'knowledge'), signal);
   }
   async context(value: unknown,actor: Actor,signal: AbortSignal): Promise<ContextResult> {
     const input=contextInput.parse(value); const view=await this.observe(input.environmentId,actor,signal);
     const previous=input.previousContextId?this.store.get('contexts',input.previousContextId):undefined;
     if (previous && previous.environmentId!==input.environmentId) throw new Error('比较上下文必须属于同一个环境。');
     const applicable=view.versions.filter(item=>item.status==='applicable').map(item=>item.definition);
-    const terms=[...new Set((input.query.normalize('NFKC').toLocaleLowerCase().match(/[a-z0-9_]+|[\p{Script=Han}]+/gu) ?? []).flatMap(term=>
-      /[\p{Script=Han}]/u.test(term) && term.length>2 ? [term,...Array.from({length:term.length-1},(_,index)=>term.slice(index,index+2))] : [term]))].slice(0,32);
-    const score=(text: string)=>terms.reduce((total,term)=>total+(text.toLocaleLowerCase().includes(term)?1:0),0);
+    const terms = searchTerms(input.query);
+    const score = (text: string) => relevance(terms, text);
     const selected=applicable.map(definition=>({definition,score:score(JSON.stringify([definition.key,definition.title,definition.content,definition.targets,definition.sql]))}))
       .filter(item=>!terms.length || item.score>0).sort((a,b)=>b.score-a.score || a.definition.key.localeCompare(b.definition.key)).slice(0,input.limit).map(item=>item.definition);
     const targetKeys=new Set(selected.flatMap(item=>item.targets.map(target=>objectKey(target.schema,target.table))));
     const candidates=view.relations.map(relation=>({relation,score:score(JSON.stringify(relation))+(targetKeys.has(objectKey(relation.schema,relation.name))?100:0)}));
+    const matchedTables = new Set(candidates.filter(item => item.score > 0)
+      .map(item => objectKey(item.relation.schema, item.relation.name)));
+    const knowledge = this.memory.view(view.context, view.metadata)
+      .filter(item => item.status === 'declared' || item.status === 'observed' || item.status === 'needs-check')
+      .map(item => ({ item, score: score(JSON.stringify(knowledgeTables(item.fact)))
+        + knowledgeTables(item.fact).filter(table => matchedTables.has(tableKey(table))).length }))
+      .filter(item => !terms.length || item.score > 0).sort((a, b) => b.score - a.score)
+      .slice(0, input.limit).map(item => item.item);
     const neighbors=new Set(candidates.filter(item=>item.score>0).flatMap(item=>item.relation.constraints.flatMap(constraint=>
       constraint.references?[objectKey(constraint.references.schema,constraint.references.table)]:[])));
+    for (const item of knowledge) for (const table of knowledgeTables(item.fact)) neighbors.add(tableKey(table));
     const relations=candidates.map(item=>({...item,score:item.score+(neighbors.has(objectKey(item.relation.schema,item.relation.name))?10:0)}))
       .filter(item=>!terms.length || item.score>0).sort((a,b)=>b.score-a.score || objectKey(a.relation.schema,a.relation.name).localeCompare(objectKey(b.relation.schema,b.relation.name)))
       .slice(0,input.limit).map(item=>item.relation);
-    const context:ContextRecord={...view.context,selection:{query:input.query,limit:input.limit,definitionIds:selected.map(item=>item.id),relationOids:relations.map(item=>item.oid)}};
+    const context:ContextRecord={...view.context,selection:{query:input.query,limit:input.limit,definitionIds:selected.map(item=>item.id),
+      relationOids:relations.map(item=>item.oid),knowledgeIds:knowledge.map(item=>item.id)}};
     this.store.put('contexts',context);
-    return { context,relations,definitions:selected,excluded:view.versions.filter(item=>item.status==='stale').map(item=>({key:item.definition.key,version:item.definition.version,reason:item.reason})),
+    return { context,relations,definitions:selected,knowledge,excluded:view.versions.filter(item=>item.status==='stale').map(item=>({key:item.definition.key,version:item.definition.version,reason:item.reason})),
       coverage:{totalRelations:view.relations.length,returnedRelations:relations.length,applicableDefinitions:applicable.length,returnedDefinitions:selected.length},
       changes:previous?{previousContextId:previous.id,structureChanged:previous.sourceFingerprint!==view.context.sourceFingerprint || previous.schemaFingerprint!==view.context.schemaFingerprint,
         definitionsChanged:previous.catalogFingerprint!==view.context.catalogFingerprint}:undefined,notes:view.notes };

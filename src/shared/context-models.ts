@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Actor, BranchBinding, DatabaseTarget } from './models.ts';
+import type { KnowledgeItem } from './knowledge-models.ts';
 
 const id = z.string().uuid();
 export const contextInput = z.strictObject({
@@ -23,8 +24,13 @@ export const constraintSchema = z.object({ name: z.string(), kind: z.string(), d
   references: z.object({ oid: z.string(), schema: z.string(), table: z.string(), columns: z.array(z.string()) }).nullable() });
 export const relationSchema = z.object({ oid: z.string(), schema: z.string(), name: z.string(), kind: z.string(), comment: z.string().nullable(),
   view: z.string().nullable(), columns: z.array(columnSchema).max(256), constraints: z.array(constraintSchema).max(128) });
-export const metadataSchema = z.object({ databaseOid: z.string(), snapshot: z.string(), relations: z.array(relationSchema).max(64) });
+export const metadataSchema = z.object({ databaseOid: z.string(), snapshot: z.string(), relations: z.array(relationSchema).max(64),
+  profileTables: z.array(z.string()).max(64).default([]),
+  lineage: z.array(z.object({ upstream: z.object({ schema: z.string(), table: z.string(), columns: z.array(z.string()).max(256) }),
+    downstream: z.object({ schema: z.string(), table: z.string() }) })).max(256).default([]),
+});
 export type RelationMetadata = z.infer<typeof relationSchema>;
+export type DatabaseMetadata = z.infer<typeof metadataSchema>;
 export interface DataState {
   environmentId: string; dataSourceId: string; mode: 'live' | 'fixed' | 'branch'; observedAt: string;
   target: DatabaseTarget; databaseOid: string; branch?: BranchBinding;
@@ -34,7 +40,7 @@ export interface DataState {
 export interface ContextRecord {
   id: string; environmentId: string; projectPath: string; dataSourceId: string; sourceFingerprint: string;
   schemaFingerprint: string; catalogFingerprint: string; state: DataState; runId: string;
-  selection?: { query: string; limit: number; definitionIds: string[]; relationOids: string[] };
+  selection?: { query: string; limit: number; definitionIds: string[]; relationOids: string[]; knowledgeIds?: string[] };
 }
 export interface SemanticDefinition extends Omit<DefinitionContent, 'expectedVersion'> {
   id: string; projectPath: string; dataSourceId: string; sourceFingerprint: string; version: number;
@@ -45,9 +51,10 @@ export interface CatalogImport { id: string; projectPath: string; dataSourceId: 
 export interface DefinitionStatus { definition: SemanticDefinition; status: 'applicable' | 'stale' | 'superseded'; reason: string }
 export interface ContextResult {
   context: ContextRecord; relations: RelationMetadata[]; definitions: SemanticDefinition[];
+  knowledge: KnowledgeItem[];
   excluded: { key: string; version: number; reason: string }[];
   coverage: { totalRelations: number; returnedRelations: number; applicableDefinitions: number; returnedDefinitions: number };
   changes?: { previousContextId: string; structureChanged: boolean; definitionsChanged: boolean };
   notes: string[];
 }
-export interface CatalogView { context: ContextRecord; relations: RelationMetadata[]; versions: DefinitionStatus[]; notes: string[] }
+export interface CatalogView { context: ContextRecord; relations: RelationMetadata[]; versions: DefinitionStatus[]; notes: string[]; knowledge: KnowledgeItem[] }
