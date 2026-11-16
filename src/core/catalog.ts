@@ -82,12 +82,14 @@ export class SemanticCatalog {
     const candidates=view.relations.map(relation=>({relation,score:score(JSON.stringify(relation))+(targetKeys.has(objectKey(relation.schema,relation.name))?100:0)}));
     const matchedTables = new Set(candidates.filter(item => item.score > 0)
       .map(item => objectKey(item.relation.schema, item.relation.name)));
-    const knowledge = this.memory.view(view.context, view.metadata)
-      .filter(item => item.status === 'declared' || item.status === 'observed' || item.status === 'needs-check')
+    const matchedKnowledge = this.memory.view(view.context, view.metadata)
       .map(item => ({ item, score: score(JSON.stringify(knowledgeTables(item.fact)))
         + knowledgeTables(item.fact).filter(table => matchedTables.has(tableKey(table))).length }))
-      .filter(item => !terms.length || item.score > 0).sort((a, b) => b.score - a.score)
-      .slice(0, input.limit).map(item => item.item);
+      .filter(item => !terms.length || item.score > 0).sort((a, b) => b.score - a.score).map(item => item.item);
+    const knowledge = matchedKnowledge.filter(item => item.status === 'declared' || item.status === 'observed' || item.status === 'needs-check')
+      .slice(0, input.limit);
+    const invalidatedRelationships = matchedKnowledge.filter(item => item.status === 'stale' && item.fact.kind === 'join'
+      && item.invalidation && item.reason === item.invalidation.reason).slice(0, input.limit);
     const neighbors=new Set(candidates.filter(item=>item.score>0).flatMap(item=>item.relation.constraints.flatMap(constraint=>
       constraint.references?[objectKey(constraint.references.schema,constraint.references.table)]:[])));
     for (const item of knowledge) for (const table of knowledgeTables(item.fact)) neighbors.add(tableKey(table));
@@ -97,7 +99,8 @@ export class SemanticCatalog {
     const context:ContextRecord={...view.context,selection:{query:input.query,limit:input.limit,definitionIds:selected.map(item=>item.id),
       relationOids:relations.map(item=>item.oid),knowledgeIds:knowledge.map(item=>item.id)}};
     this.store.put('contexts',context);
-    return { context,relations,definitions:selected,knowledge,excluded:view.versions.filter(item=>item.status==='stale').map(item=>({key:item.definition.key,version:item.definition.version,reason:item.reason})),
+    return { context,relations,definitions:selected,knowledge,invalidatedRelationships,
+      excluded:view.versions.filter(item=>item.status==='stale').map(item=>({key:item.definition.key,version:item.definition.version,reason:item.reason})),
       coverage:{totalRelations:view.relations.length,returnedRelations:relations.length,applicableDefinitions:applicable.length,returnedDefinitions:selected.length},
       changes:previous?{previousContextId:previous.id,structureChanged:previous.sourceFingerprint!==view.context.sourceFingerprint || previous.schemaFingerprint!==view.context.schemaFingerprint,
         definitionsChanged:previous.catalogFingerprint!==view.context.catalogFingerprint}:undefined,notes:view.notes };

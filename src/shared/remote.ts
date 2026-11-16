@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { createTypertRemoteInfo } from '@deepseek-ai/dsh-typert-protocol/remote-info';
 import type { TypertRemoteSpec } from '@deepseek-ai/dsh-typert-protocol';
-import { connectionInput, deliverInput, deriveInput, environmentInput, queryInput, stelloInput } from './models.ts';
-import type { BranchOperation, Connection, DatabaseTarget, DeliveredResult, Environment, Run, Snapshot } from './models.ts';
+import { connectionInput, deliverInput, deriveInput, environmentInput, experimentInput, experimentResultInput, queryInput, stelloInput } from './models.ts';
+import type { BranchOperation, Connection, DatabaseTarget, DeliveredResult, Environment, ExperimentDetail, Run, Snapshot } from './models.ts';
 import { contextInput, importCatalogInput } from './context-models.ts';
 import type { CatalogView, ContextResult, SemanticDefinition } from './context-models.ts';
+import { metricInput } from './metric-models.ts';
 
 export const PACKAGE = '@stellane/harness-plugin';
 export const requestSchemas = {
@@ -13,7 +14,10 @@ export const requestSchemas = {
   probe: z.strictObject({ connectionId: z.string().uuid() }),
   createEnvironment: environmentInput,
   prepareConversation: z.strictObject({ environmentId: z.string().uuid() }),
+  bindConversation: z.strictObject({ environmentId: z.string().uuid(), sessionId: z.string().min(1).max(128) }),
   query: queryInput,
+  metric: metricInput,
+  runEvidence: z.strictObject({ id: z.string().uuid() }),
   saveStello: stelloInput,
   checkpoint: deriveInput, fork: deriveInput, execute: queryInput, deliver: deliverInput,
   results: z.strictObject({ environmentId: z.string().uuid() }),
@@ -22,16 +26,21 @@ export const requestSchemas = {
   context: contextInput,
   catalogView: z.strictObject({ environmentId: z.string().uuid() }),
   importCatalog: importCatalogInput,
+  startExperiment: experimentInput, captureExperiment: experimentResultInput,
+  experimentDetail: z.strictObject({ id: z.string().uuid() }), finishExperiment: z.strictObject({ id: z.string().uuid() }),
 };
 export type Operation = keyof typeof requestSchemas;
 export type Requests = { [K in Operation]: z.input<(typeof requestSchemas)[K]> };
 export interface Responses {
   snapshot: Snapshot; saveConnection: Connection; probe: DatabaseTarget;
   createEnvironment: Environment; query: Run;
-  prepareConversation: { workspaceId: string };
+  metric: Run; runEvidence: Run;
+  prepareConversation: { workspaceId: string; sessionId?: string };
+  bindConversation: { sessionId: string };
   saveStello: Environment; checkpoint: Environment; fork: Environment; execute: Run;
   deliver: DeliveredResult; results: DeliveredResult[]; reconcileRun: Run; reconcileOperation: BranchOperation;
   context: ContextResult; catalogView: CatalogView; importCatalog: SemanticDefinition[];
+  startExperiment: ExperimentDetail; experimentDetail: ExperimentDetail; captureExperiment: ExperimentDetail; finishExperiment: ExperimentDetail;
 }
 export type Reply<T> = { success: true; value: T } | { success: false; error: string };
 

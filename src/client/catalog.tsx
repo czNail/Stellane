@@ -17,7 +17,7 @@ export function knowledgeLabel({ fact }: KnowledgeItem): string {
   return `${endpointName(fact.from)} → ${endpointName(fact.to)}`;
 }
 
-function KnowledgeList({ items, search }: { items: KnowledgeItem[]; search: string }) {
+function KnowledgeList({ items, search, openEvidence }: { items: KnowledgeItem[]; search: string; openEvidence: (id: string) => void }) {
   const matches = items.filter(item => knowledgeLabel(item).toLocaleLowerCase().includes(search));
   const current = matches.filter(item => item.status !== 'superseded' && item.status !== 'stale');
   const history = matches.filter(item => item.status === 'superseded' || item.status === 'stale');
@@ -26,11 +26,13 @@ function KnowledgeList({ items, search }: { items: KnowledgeItem[]; search: stri
     <div className="st-item-body">
       {item.fact.kind === 'view-lineage' ? <p>引用字段 {item.fact.upstream.columns.join('、') || '整表依赖'}</p>
         : item.fact.kind === 'row-key' ? <p>观测 {item.fact.profile.rows} 行 · 空键 {item.fact.profile.nullRows} 行 · 重复键 {item.fact.profile.duplicateKeys} 组</p>
-          : <p>来源 {item.fact.source.rows} 行 · 目标 {item.fact.target.rows} 行 · 未匹配 {item.fact.unmatchedRows} 行</p>}
+          : <p>{('invalidation' in item && item.invalidation) ? '原验证 · ' : ''}来源 {item.fact.source.rows} 行 · 目标 {item.fact.target.rows} 行 · 未匹配 {item.fact.unmatchedRows} 行</p>}
+      {'invalidation' in item && item.invalidation?.unmatchedRows !== undefined && <p>本次复核 · 未匹配 {item.invalidation.unmatchedRows} 行</p>}
       {'reason' in item && item.reason && <p className="st-muted">{item.reason}</p>}
       <details className="st-details"><summary>验证证据</summary>
-        <p className="st-path">{new Date(item.evidence.observedAt).toLocaleString()} · 执行 {item.evidence.runId}{'version' in item && ` · 版本 ${item.version}`}</p>
-        {'invalidation' in item && item.invalidation && <p className="st-path">复核记录 {item.invalidation.evidence.runId}</p>}
+        <p className="st-path">{new Date(item.evidence.observedAt).toLocaleString()}{'version' in item && ` · 版本 ${item.version}`}</p>
+        <div className="st-actions"><button className="st-button" onClick={() => openEvidence(item.evidence.runId)}>打开原验证记录</button>
+          {'invalidation' in item && item.invalidation && <button className="st-button" onClick={() => openEvidence(item.invalidation!.evidence.runId)}>打开本次复核</button>}</div>
       </details>
     </div>
   </details>;
@@ -126,7 +128,9 @@ function ImportForm({ relation, busy, onSave, onClose }: {
   </form>;
 }
 
-export function CatalogPanel({ api, environment, onExplore }: { api: Api; environment: Environment; onExplore: () => void }) {
+export function CatalogPanel({ api, environment, onExplore, openEvidence }: {
+  api: Api; environment: Environment; onExplore: () => void; openEvidence: (id: string) => void;
+}) {
   const [view, setView] = useState<CatalogView>();
   const [tab, setTab] = useState<CatalogTab>('tables');
   const [search, setSearch] = useState('');
@@ -190,7 +194,7 @@ export function CatalogPanel({ api, environment, onExplore }: { api: Api; enviro
     {view && <>
       {tab === 'tables' && <TableList relations={view.relations} search={term} />}
       {tab === 'definitions' && <DefinitionList versions={view.versions} search={term} onEdit={definition => { setError(''); setEditor({ kind: 'form', definition }); }} />}
-      {tab === 'relationships' && <KnowledgeList items={view.knowledge} search={term} />}
+      {tab === 'relationships' && <KnowledgeList items={view.knowledge} search={term} openEvidence={openEvidence} />}
       <details className="st-details st-catalog-audit"><summary>目录来源</summary>
         <p className="st-path">{view.context.state.target.database} · {new Date(view.context.state.observedAt).toLocaleString()}</p>
         <p className="st-path">环境 {view.context.environmentId} · 执行 {view.context.runId}</p>

@@ -21,6 +21,8 @@
 .st-shell { width: 100%; max-width: 1060px; margin-inline: auto; }
 .st-topbar { display: flex; align-items: center; gap: 30px; min-height: 68px; border-bottom: 1px solid var(--st-border); }
 .st-main-nav, .st-tabs { display: flex; gap: 20px; }
+.st-sources-button { margin-left: auto; }
+.st-sources-button[aria-current='page'] { background: var(--st-layer); color: var(--st-fg); }
 .st-main-nav button, .st-tabs button, .st-segment button, .st-menu-body button, .st-history button, .st-tool button {
   font: inherit;
   color: inherit;
@@ -113,7 +115,10 @@
 .st-reference .st-content { margin-top: 6px; }
 .st-status { display: inline-block; padding: 2px 7px; border-radius: 5px; background: var(--st-layer); color: var(--st-secondary); font-size: 11px; white-space: nowrap; }
 .st-failed, .st-interrupted, .st-unknown { color: var(--st-error); }
+.st-result { min-width: 0; }
 .st-result > .st-details { margin-top: 9px; }
+.st-metric-summary { gap: 6px; padding-block: 8px; }
+.st-metric-tail { border-top: 1px solid var(--st-border); margin-top: 12px; }
 .st-result > .st-button { margin-block: 8px; }
 .st-result-sql {
   flex: 1 1 180px;
@@ -143,6 +148,7 @@
 .st-history button:hover { background: var(--st-hover); }
 .st-history code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .st-history time { color: var(--st-secondary); font-size: 11px; white-space: nowrap; }
+.st-run-source { max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 
 .st-list { border-top: 1px solid var(--st-border); }
 .st-list-row { padding: 12px 0; border-bottom: 1px solid var(--st-border); min-width: 0; }
@@ -158,6 +164,31 @@
 .st-item-body > p { margin-block: 4px; }
 .st-catalog-audit { padding-top: 8px; }
 .st-settings-page { padding-block: 8px; }
+
+.st-back { justify-self: start; padding-inline: 0; }
+.st-task-title h2 { overflow-wrap: anywhere; }
+.st-task-scope {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border: 1px solid var(--st-border);
+  border-radius: 9px;
+  background: var(--st-layer);
+}
+.st-task-scope > div { min-width: 0; padding: 12px 15px; }
+.st-task-scope > div + div { border-left: 1px solid var(--st-border); }
+.st-task-scope dt { color: var(--st-secondary); font-size: 12px; }
+.st-task-scope dd { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.st-task-scope small { margin-left: 6px; color: var(--st-secondary); }
+.st-task-project { width: min(100%, 320px); }
+.st-task-notice { padding: 12px; border-radius: 8px; background: var(--st-layer); overflow-wrap: anywhere; }
+.st-task-notice .st-muted { margin-inline-start: 8px; }
+.st-task-notice p { margin-top: 4px; }
+.st-task-section { padding-block: 12px; border-top: 1px solid var(--st-border); gap: 10px; }
+.st-task-result { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.st-task-result .st-source-row > div { min-width: 0; }
+.st-section-heading, .st-task-footer { justify-content: space-between; }
+.st-task-footer { border-top: 1px solid var(--st-border); padding-block: 14px; }
 
 .st-dialog {
   width: min(580px, calc(100vw - 30px));
@@ -205,6 +236,11 @@
   .st-catalog-toolbar > .st-actions { margin-left: 0; }
 }
 @media (max-width: 420px) {
+  .st-topbar { gap: 4px 12px; flex-wrap: wrap; padding-top: 8px; }
+  .st-main-nav { order: 1; flex-basis: 100%; }
+  .st-main-nav button { padding-block: 7px; }
+  .st-task-scope { grid-template-columns: 1fr; }
+  .st-task-scope > div + div { border-left: 0; border-top: 1px solid var(--st-border); }
   .st-editor-grid, .st-form-grid { grid-template-columns: 1fr; }
   .st-empty { padding: 20px; }
   .st-dialog { padding: 15px; }

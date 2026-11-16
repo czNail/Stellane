@@ -18,6 +18,7 @@ HOST = NETWORK + '-host'
 OBJECTS = NETWORK + '-objects'
 UBUNTU = 'ubuntu@sha256:69cecf4bbf72d2d44a9eef1b71fb98c7fb973d78af11399deccef19beb008ad9'
 RUSTFS = 'rustfs/rustfs@sha256:97171b3d72cd47dc81000f92ea84de25608bfc35a94c965501afaeb5d99f6035'
+BASELINE = 'stellane/main'
 
 
 def run(*args, input=None, check=True, timeout=60):
@@ -57,6 +58,47 @@ def execute(*args, **kwargs):
                   f'LD_LIBRARY_PATH={STATE}/install/lib:{STATE}/install/lib/x86_64-linux-gnu', *args, **kwargs)
 
 
+def wait_for_systemd():
+    deadline = time.monotonic() + 30
+    while execute('systemctl', 'show', '--property=Version', check=False).returncode:
+        if time.monotonic() > deadline:
+            raise RuntimeError('Private systemd host did not start')
+        time.sleep(.2)
+
+
+def cluster_lifecycle(cli, running):
+    # A live status probe can wait for stopped services. Use the private CLI journal to select the next command.
+    phase = execute('python3', '-c', 'import json; from pathlib import Path; '
+                    'print(json.loads(Path("/node/client/clusters/stellane/state.json").read_text())["phase"])').stdout.strip()
+    if (phase == 'stopping' and running) or (phase == 'starting' and not running):
+        phase = json.loads(execute(cli, 'cluster', 'resume', '--json', timeout=600).stdout)['state']
+    target = 'available' if running else 'stopped'
+    if phase != target:
+        execute(cli, 'cluster', 'start' if running else 'stop', '--json', timeout=600)
+
+
+def ready_baseline(cli):
+    args = (cli, 'branch', 'get', BASELINE, '--json')
+    seeded = (STATE / 'provider.json').is_file()
+    if not seeded and execute(*args, check=False).returncode:
+        execute(cli, 'database', 'create', 'stellane', '--json', timeout=300)
+    deadline = time.monotonic() + 60
+    while True:
+        observed = execute(*args, check=False)
+        if not observed.returncode:
+            status = json.loads(observed.stdout)
+            if status['state'] == 'stopped' and status['complete']:
+                # Recover the fixture source after older versions stopped Docker directly.
+                execute(cli, 'branch', 'start', BASELINE, '--json', timeout=300)
+                return
+            if status['state'] in ('ready', 'sleeping', 'released') and status['complete']:
+                return
+        if time.monotonic() >= deadline:
+            (STATE / 'last-error.log').write_text(observed.stderr + observed.stdout)
+            raise RuntimeError(f'Stello source is not ready; inspect {STATE} locally')
+        time.sleep(.5)
+
+
 def finish(project):
     install = STATE / 'install'
     slots = json.loads((STATE / 'node/spec.json').read_text())['slots_per_compute']
@@ -68,13 +110,14 @@ def finish(project):
             'Path("/etc/ld.so.conf.d/stellane.conf").write_text(sys.argv[1]+"/lib\\n"+sys.argv[1]+"/lib/x86_64-linux-gnu\\n")', str(install))
     execute('/usr/sbin/ldconfig', '-X')
     cli = install / 'bin/stello'
-    applied = execute(cli, 'cluster', 'apply', '--file', '/node/spec.json', '--json', timeout=600)
     node = STATE / 'node'
-    (node / 'apply.json').write_text(applied.stdout)
-    existing = execute(cli, 'branch', 'get', 'stellane/main', '--json', check=False)
-    if existing.returncode:
-        execute(cli, 'database', 'create', 'stellane', '--json', timeout=300)
-    execute(cli, 'connect', 'stellane/main', '--output', '/node/baseline', '--json')
+    if (node / 'apply.json').is_file():
+        cluster_lifecycle(cli, running=True)
+    else:
+        applied = execute(cli, 'cluster', 'apply', '--file', '/node/spec.json', '--json', timeout=600)
+        (node / 'apply.json').write_text(applied.stdout)
+    ready_baseline(cli)
+    execute(cli, 'connect', BASELINE, '--output', '/node/baseline', '--json')
     execute('env', 'PGSERVICEFILE=/node/baseline/pg_service.conf', install / 'bin/psql', '-X', '-v', 'ON_ERROR_STOP=1',
             'service=stello', '-c', "CREATE TABLE IF NOT EXISTS sample_data (id integer PRIMARY KEY, label text NOT NULL, value integer NOT NULL, group_name text NOT NULL); "
             "INSERT INTO sample_data VALUES (1,'alpha',120,'group_a'),(2,'beta',80,'group_b'),(3,'gamma',160,'group_a') ON CONFLICT DO NOTHING;")
@@ -82,7 +125,7 @@ def finish(project):
         execute(cli, 'context', 'export', '--output', '/node/export', '--json')
     execute('chown', '-R', f'{os.getuid()}:{os.getgid()}', '/node/export')
     save(STATE / 'provider.json', {'name': 'Stellane 分支开发库', 'projectPath': str(project),
-         'configPath': str(node / 'export/client.json'), 'resource': 'stellane/main'})
+         'configPath': str(node / 'export/client.json'), 'resource': BASELINE})
     print(f'Stellane private Stello ready. Provider fields: {STATE / "provider.json"}')
 
 
@@ -106,8 +149,10 @@ def main():
     host, objects = owned('container', HOST), owned('container', OBJECTS)
     network = owned('network', NETWORK)
     if args.command == 'stop':
+        if host and host['State']['Running'] and (STATE / 'node/apply.json').is_file():
+            cluster_lifecycle(STATE / 'install/bin/stello', running=False)
         for name, value in [(HOST, host), (OBJECTS, objects)]:
-            if value:
+            if value and value['State']['Running']:
                 docker('stop', name, timeout=90)
         print('Stellane Stello stopped; containers, data and credentials retained.')
         return
@@ -120,6 +165,7 @@ def main():
             docker('start', OBJECTS)
         if not host['State']['Running']:
             docker('start', HOST)
+        wait_for_systemd()
         finish(project)
         return
     if objects or network:
@@ -159,11 +205,7 @@ def main():
                  '/usr/share', '/etc/ssl/openssl.cnf']:
         command += ['--mount', f'type=bind,src={path},dst={path},readonly']
     docker(*command, UBUNTU, '/lib/systemd/systemd', '--unit=multi-user.target', '--log-level=warning')
-    deadline = time.monotonic() + 30
-    while execute('systemctl', 'show', '--property=Version', check=False).returncode:
-        if time.monotonic() > deadline:
-            raise RuntimeError('Private systemd host did not start')
-        time.sleep(.2)
+    wait_for_systemd()
     execute('python3', '-c', 'import os,stat;[(os.mknod("/dev/loop"+str(i),stat.S_IFBLK|0o600,os.makedev(7,i))) '
             'for i in range(128) if not os.path.exists("/dev/loop"+str(i))]')
     address = inspect('container', HOST)['NetworkSettings']['Networks'][NETWORK]['IPAddress']

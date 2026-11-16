@@ -3,38 +3,42 @@ import type { ContextResult } from '../shared/context-models.ts';
 import type { Environment, QueryPreview, Run, Snapshot } from '../shared/models.ts';
 import { knowledgeLabel, knowledgeStatus } from './catalog.tsx';
 import { message, type Api } from './workspace-ui.tsx';
+import { MetricSummary } from './metric.tsx';
 
 export const runStatus = { running: '执行中', succeeded: '完成', failed: '失败', interrupted: '已中断', unknown: '待核实' };
-export type Conversation = (workspaceId: string, prompt: string) => void;
+export type Conversation = (environmentId: string, prompt?: string, options?: { unbound?: boolean }) => Promise<void>;
 export type ExploreMode = 'ask' | 'sql';
 type ResultView = 'result' | 'history' | 'deliveries';
 
-function PreviewTable({ preview }: { preview: QueryPreview }) {
+function PreviewTable({ preview, metric }: { preview: QueryPreview; metric?: boolean }) {
   if (!preview.columns.length) return null;
   return <div className="st-table-scroll"><table>
     <thead><tr>{preview.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
     <tbody>{preview.rows.map((row, index) => <tr key={index}>{preview.columns.map(column => {
       const value = row[column];
-      return <td key={column}>{value === null ? <span className="st-muted">NULL</span> : typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')}</td>;
+      return <td key={column}>{value === null ? <span className="st-muted">{metric && column === '归属' ? '未归因' : 'NULL'}</span>
+        : typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')}</td>;
     })}</tr>)}</tbody>
   </table></div>;
 }
 
-function QueryResult({ run, onReconcile, busy }: { run: Run; onReconcile: () => void; busy: boolean }) {
+export function QueryResult({ run, onReconcile, busy }: { run: Run; onReconcile?: () => void; busy?: boolean }) {
   const preview = run.preview;
   return <section className="st-result" aria-label="查询结果">
+    {run.metric && <MetricSummary metric={run.metric} />}
     <div className="st-row st-result-meta"><span className={`st-status st-${run.status}`}>{runStatus[run.status]}</span>
       <span className="st-muted">{preview && (run.kind === 'execute' ? `影响 ${preview.affectedRows ?? 0} 行` : `${preview.rowCount} 行${preview.truncated ? '预览' : ''}`)}
         {run.durationMs !== undefined && `${preview ? ' · ' : ''}${run.durationMs} ms`}</span>
-      <code className="st-result-sql" title={run.sql}>{run.sql}</code>
+      {!run.metric && <code className="st-result-sql" title={run.sql}>{run.sql}</code>}
     </div>
     {run.error && <p role="alert" className="st-error">{run.error}</p>}
-    {run.status === 'unknown' && <button className="st-button" disabled={busy} onClick={onReconcile}>核对原写入回执</button>}
+    {run.status === 'unknown' && onReconcile && <button className="st-button" disabled={busy} onClick={onReconcile}>核对原写入回执</button>}
     {preview && (run.kind !== 'execute' && preview.rowCount === 0
       ? <p className="st-list-empty">没有符合条件的记录。</p>
-      : <PreviewTable preview={preview} />)}
+      : <PreviewTable preview={preview} metric={!!run.metric} />)}
     <details className="st-details"><summary>执行详情</summary>
       <pre className="st-code">{run.sql}</pre>
+      {!!run.values?.length && <p className="st-path">查询参数 <code>{JSON.stringify(run.values)}</code></p>}
       {run.target && <p className="st-path">{run.target.database} · {run.target.user} · {run.target.address ?? '本地'}:{run.target.port ?? '—'}</p>}
       {run.branch && <p className="st-path">{run.branch.resource} · 来源位置 {run.branch.forkLsn}</p>}
       <p className="st-path">{run.actor.kind === 'agent' ? `Agent ${run.actor.id}` : '用户操作'} · {run.id}</p>
@@ -72,6 +76,7 @@ export function Explore({ api, environment, data, mode, onMode, refresh, openCon
 }) {
   const [question, setQuestion] = useState('');
   const [sql, setSql] = useState('');
+  const [showComposer, setShowComposer] = useState(!focusRun);
   const [reference, setReference] = useState<ContextResult>();
   const [resultView, setResultView] = useState<ResultView>('result');
   const [selectedRun, setSelectedRun] = useState<Run>();
@@ -95,10 +100,7 @@ export function Explore({ api, environment, data, mode, onMode, refresh, openCon
     const prompt = isSql
       ? `请在 Stellane 环境 ${environmentId} 执行以下只读 SQL。先用 stellane_context 核对表结构和业务说明，再用 stellane_query 执行并解释结果。\n\n${text}`
       : `请在 Stellane 环境 ${environmentId} 调查下面的问题。先用问题调用 stellane_context 获取业务说明、表结构、关联和血缘。根据需要执行只读 SQL。要沿用待核对的关系，先用 stellane_learn 复核。发现有业务意义的隐性键或关联时，也用 stellane_learn 验证和保存。引用所用业务来源与执行证据。\n\n${text}`;
-    return act('ask', async () => {
-      const { workspaceId } = await api('prepareConversation', { environmentId });
-      openConversation(workspaceId, prompt);
-    });
+    return act('ask', () => openConversation(environmentId, prompt));
   }
 
   function execute(operation: 'query' | 'execute') {
@@ -122,11 +124,11 @@ export function Explore({ api, environment, data, mode, onMode, refresh, openCon
   const runningSql = busy === 'query' || busy === 'execute';
 
   return <section className="st-stack" aria-label="探索">
-    <div className="st-page-heading"><div><h2>探索数据</h2><p className="st-muted">结合业务说明、数据关系和血缘调查问题。</p></div>
-      <div className="st-segment" aria-label="探索方式">
-        <button aria-pressed={mode === 'ask'} disabled={!!busy} onClick={() => { onMode('ask'); setError(''); }}>向 Agent 提问</button>
+    <div className="st-page-heading"><h2>{showComposer ? '探索数据' : '执行证据'}</h2>
+      {showComposer ? <div className="st-segment" aria-label="探索方式">
         <button aria-pressed={mode === 'sql'} disabled={!!busy} onClick={() => { onMode('sql'); setError(''); }}>执行 SQL</button>
-      </div></div>
+        <button aria-pressed={mode === 'ask'} disabled={!!busy} onClick={() => { onMode('ask'); setError(''); }}>按环境提问</button>
+      </div> : <button className="st-button" onClick={() => setShowComposer(true)}>打开 SQL 编辑器</button>}</div>
     {latestUnknown && (mode !== 'sql' || resultView !== 'result' || currentRun?.id !== latestUnknown.id) && <div className="st-row st-attention"><span>有一笔写入待核实。</span>
       <button className="st-button" disabled={!!busy} onClick={() => { onMode('sql'); setSelectedRun(latestUnknown); setResultView('result'); }}>查看记录</button></div>}
     {mode === 'ask' ? <>
@@ -142,9 +144,9 @@ export function Explore({ api, environment, data, mode, onMode, refresh, openCon
         </div>
       </form>
       {reference && <ReferencePreview result={reference} />}
-      <p className="st-muted">问题会带入 Harness 对话，发送后开始探索。</p>
+      <p className="st-muted">从这里打开的 Harness 对话会绑定当前环境。</p>
     </> : <>
-      <form className="st-composer" onSubmit={event => { event.preventDefault(); if (!busy && sql.trim()) void execute('query'); }}>
+      {showComposer && <form className="st-composer" onSubmit={event => { event.preventDefault(); if (!busy && sql.trim()) void execute('query'); }}>
         <label className="st-field"><span>SQL 查询</span><textarea value={sql} onChange={event => setSql(event.target.value)} rows={6}
           maxLength={16384} spellCheck={false} disabled={!!busy} placeholder="SELECT …" required /></label>
         <div className="st-composer-footer"><span className="st-muted">{environment.access === 'read-write' ? '可写分支' : '只读查询'}</span>
@@ -153,7 +155,7 @@ export function Explore({ api, environment, data, mode, onMode, refresh, openCon
             <button className="st-button" type="button" disabled={!!busy || !sql.trim()} onClick={() => void ask(sql.trim(), true)}>在对话中查询</button>
             <button className="st-button st-primary" type="submit" disabled={!!busy || !sql.trim()}>{busy === 'query' ? '查询中…' : '执行查询'}</button>
           </div></div>
-      </form>
+      </form>}
       <nav className="st-tabs" aria-label="SQL 结果视图">
         <button aria-pressed={resultView === 'result'} onClick={() => setResultView('result')}>查询结果</button>
         <button aria-pressed={resultView === 'history'} onClick={() => setResultView('history')}>执行历史</button>

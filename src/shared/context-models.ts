@@ -52,6 +52,7 @@ export interface DefinitionStatus { definition: SemanticDefinition; status: 'app
 export interface ContextResult {
   context: ContextRecord; relations: RelationMetadata[]; definitions: SemanticDefinition[];
   knowledge: KnowledgeItem[];
+  invalidatedRelationships?: KnowledgeItem[];
   excluded: { key: string; version: number; reason: string }[];
   coverage: { totalRelations: number; returnedRelations: number; applicableDefinitions: number; returnedDefinitions: number };
   changes?: { previousContextId: string; structureChanged: boolean; definitionsChanged: boolean };

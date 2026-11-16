@@ -6,9 +6,10 @@ import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { StellaneCore } from '../src/core/index.ts';
 import { Store } from '../src/core/store.ts';
-import type { QueryProvider } from '../src/providers/postgres.ts';
+import { PostgresProvider, WriteOutcomeError, type QueryProvider } from '../src/providers/postgres.ts';
+import type { ClientConfig } from 'pg';
 import { encodeResource, StelloProvider, StelloRequestError } from '../src/providers/stello.ts';
-import type { Actor, BranchOperation, ConnectionInput, QueryPreview, StelloSource } from '../src/shared/models.ts';
+import type { Actor, BranchIdentity, BranchOperation, ConnectionInput, QueryInput, QueryPreview, StelloSource } from '../src/shared/models.ts';
 
 const owner: Actor = { kind: 'user', id: 'owner' };
 const preview = (database = 'test'): QueryPreview => ({ columns: ['value'], rows: [{ value: 1 }], rowCount: 1, truncated: false,
@@ -134,4 +135,215 @@ test('Stello busy after admission observes the original ticket without replaying
   assert.equal(result.forkLsn, '0/A');
   assert.equal(actions.filter(action => action === 'branch_create').length, 1);
   assert(actions.every(action => ['branch_get', 'prepare_resource', 'branch_create'].includes(action)));
+});
+
+test('experiment recovers its original resources, scopes its conversation and preserves fixed evidence after cleanup', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'stellane-experiment-'));
+  const root = { service: 'test-service', slot: 0, incarnation: 1 };
+  const name = encodeResource('test/main');
+  interface Branch {
+    name: string; identity: BranchIdentity; resource_id: string; mode: 'writable' | 'fixed'; fork_lsn: string;
+    complete: boolean; state: string; revision: number; creation_id?: string; parent_identity?: BranchIdentity; operation_id?: string;
+  }
+  const resources = new Map<string, Branch>([[name, { name, identity: root, resource_id: 'root', mode: 'writable',
+    fork_lsn: '0/1', complete: true, state: 'ready', revision: 1 }]]);
+  const deleteCalls: Record<string, unknown>[] = [];
+  let lostCreation = true;
+  let lostDeletion = true;
+  let lostWrite = true;
+  let allowReceipt = false;
+  let writes = 0;
+  class ExperimentProvider extends StelloProvider {
+    override readonly sql = new class extends PostgresProvider {
+      override async query(_connection: ClientConfig | ConnectionInput, input: QueryInput) {
+        if (input.sql === 'SELECT missing') throw new Error('missing column');
+        return preview();
+      }
+      override async execute() {
+        writes++;
+        if (lostWrite) { lostWrite = false; throw new WriteOutcomeError(true, 'commit reply lost'); }
+        return preview();
+      }
+      override async receipt() { return allowReceipt ? preview() : undefined; }
+    }();
+    override async operation(_source: StelloSource, body: Record<string, unknown>) {
+      const name = String(body.name);
+      if (body.action === 'prepare_resource') {
+        const request = body.request as { parent: string };
+        return { identity: { ...root, slot: resources.size }, database: root, parent_identity: resources.get(request.parent)!.identity, source_history: 'source' };
+      }
+      if (body.action === 'branch_create') {
+        assert(!resources.has(name));
+        const identity = body.identity as BranchIdentity;
+        resources.set(name, { name, identity, resource_id: name, mode: body.mode as Branch['mode'], fork_lsn: '0/A',
+          complete: true, state: 'ready', revision: 1, creation_id: String(body.creation_id), parent_identity: body.parent_identity as BranchIdentity });
+        if (lostCreation) { lostCreation = false; throw new Error('create reply lost'); }
+        return resources.get(name);
+      }
+      const branch = resources.get(name)!;
+      if (body.action === 'branch_change') {
+        deleteCalls.push(body);
+        assert.deepEqual(body.identity, branch.identity);
+        if (lostDeletion) { lostDeletion = false; throw new Error('delete reply lost before admission'); }
+        branch.state = 'deleted';
+        branch.revision++;
+        branch.operation_id = String(body.operation_id);
+        return branch;
+      }
+      if (body.action === 'branch_connect') return { ...branch, connection: { ...preview().target, host: 'localhost', ca: 'example', password: 'test' } };
+      assert.equal(body.action, 'branch_get');
+      return branch;
+    }
+  }
+  const directory = join(project, 'state');
+  const branches = new ExperimentProvider();
+  let core = new StellaneCore(directory, provider, branches);
+  try {
+    const source = await core.saveStello({ name: 'source', projectPath: project, configPath: '/unused', resource: 'test/main' });
+    const request = { id: randomUUID(), name: 'comparison', environmentId: source.id };
+    assert.match((await core.startExperiment(request)).experiment.error!, /create reply lost/);
+    assert.equal(resources.size, 2);
+    await core.close();
+    core = new StellaneCore(directory, provider, branches);
+    const ready = await core.startExperiment(request);
+    const work = ready.work!;
+    const options = { environmentId: work.id, sql: 'UPDATE sample_data SET value = 2' };
+    assert.equal(ready.experiment.status, 'active');
+    assert.equal(resources.size, 3);
+    const agent: Actor = { kind: 'agent', id: 'experiment-session', projectPath: project, callId: 'mutation' };
+    const other: Actor = { ...agent, id: 'same-project-other-session' };
+    await assert.rejects(core.query(options, other), /无权/);
+    assert.deepEqual((await core.environments(other)).map(e => e.id), [source.id]);
+    assert.equal(core.bindConversation(work.id, agent.id), agent.id);
+    assert.throws(() => core.bindConversation(source.id, agent.id), /另一个/);
+    assert.deepEqual((await core.environments(agent)).map(e => e.id), [work.id]);
+    await assert.rejects(core.query({ ...options, environmentId: source.id }, agent), /无权/);
+    const unknown = await core.write(options, agent);
+    assert.equal(unknown.status, 'unknown');
+    await assert.rejects(core.finishExperiment(request.id), /核对/);
+    assert.equal((await core.reconcileRun(unknown.id, owner)).status, 'unknown');
+    allowReceipt = true;
+    assert.equal((await core.reconcileRun(unknown.id, owner)).status, 'succeeded');
+    assert.equal(writes, 1);
+
+    const capture = await core.captureExperiment({ id: request.id, summary: 'findings', sql: 'SELECT missing' });
+    assert(capture.result);
+    assert.match(capture.experiment.error!, /补查/);
+    const recorded = await core.captureExperiment({ id: request.id, summary: 'findings', sql: 'SELECT 1' });
+    assert.equal(recorded.delivered?.environment.id, capture.result.id);
+    assert.equal(resources.size, 4);
+    assert.deepEqual(await core.results(source.id, other), []);
+
+    const closing = await core.finishExperiment(request.id);
+    assert.equal(closing.experiment.status, 'closing');
+    assert.match(closing.experiment.error!, /delete reply lost/);
+    await assert.rejects(core.query({ ...options, sql: 'SELECT 1' }, agent), /无权/);
+    const branch = resources.get(encodeResource(work.stello!.resource))!;
+    const originalIdentity = branch.identity;
+    branch.identity = { ...originalIdentity, incarnation: originalIdentity.incarnation + 1 };
+    assert.match((await core.finishExperiment(request.id)).experiment.error!, /同名资源/);
+    assert.equal(deleteCalls.length, 1);
+    branch.identity = originalIdentity;
+    await core.close();
+    core = new StellaneCore(directory, provider, branches);
+    const ended = await core.finishExperiment(request.id);
+    assert.equal(ended.experiment.status, 'closed');
+    assert.deepEqual(deleteCalls[0], deleteCalls[1]);
+    assert.equal(resources.get(name)?.state, 'ready');
+    assert(ended.work?.removedAt);
+    assert(ended.baseline?.removedAt);
+    assert.deepEqual(core.snapshot().environments.map(e => e.id).sort(), [source.id, capture.result.id].sort());
+    await assert.rejects(core.query({ ...options, sql: 'SELECT 1' }, owner), /已清理/);
+    assert.equal((await core.query({ environmentId: capture.result.id, sql: 'SELECT 1' }, owner)).status, 'succeeded');
+
+    const chat: Actor = { kind: 'agent', id: 'ordinary-project-session', projectPath: project, callId: 'start' };
+    const sibling: Actor = { ...chat, id: 'sibling-project-session' };
+    const chatRequest = { environmentId: source.id, name: '试算新规则' };
+    const stateBefore = resources.size;
+    lostCreation = true;
+    const pending = await core.startConversationExperiment(chatRequest, chat);
+    assert.equal(pending.experiment.sessionId, chat.id);
+    assert.equal(pending.experiment.status, 'preparing');
+    const started = await core.startConversationExperiment(chatRequest, { ...chat, callId: 'retry-start' });
+    assert.equal(started.experiment.id, pending.experiment.id);
+    assert.equal(started.experiment.status, 'active');
+    assert.equal(resources.size, stateBefore + 2);
+    const experimentId = started.experiment.id;
+    const workId = started.work!.id;
+    const proof = { id: experimentId, sql: 'SELECT $1::int', summary: '试算结果', values: [1] };
+    assert.deepEqual(await core.conversationExperiments(sibling), []);
+    await assert.rejects(core.conversationExperiments(sibling, experimentId), /无权/);
+    await assert.rejects(core.captureExperiment(proof, undefined, sibling), /无权/);
+    await assert.rejects(core.finishExperiment(experimentId, undefined, sibling), /无权/);
+    await assert.rejects(core.finishExperiment(experimentId, undefined, chat), /先固定并交付/);
+    await assert.rejects(core.write({ ...options, environmentId: workId }, sibling), /无权/);
+    assert.equal((await core.query({ environmentId: source.id, sql: 'SELECT 1' }, chat)).status, 'succeeded');
+    assert.equal((await core.write({ ...options, environmentId: workId }, chat)).status, 'succeeded');
+    const published = await core.captureExperiment(proof, undefined, chat);
+    assert.equal(published.delivered?.run.actor.id, chat.id);
+    assert.deepEqual(published.delivered?.run.values, [1]);
+    const finished = await core.finishExperiment(experimentId, undefined, chat);
+    assert.equal(finished.experiment.status, 'closed');
+    assert(finished.work?.removedAt);
+    assert.equal(finished.delivered?.run.id, published.delivered?.run.id);
+    assert.deepEqual((await core.environments(chat)).map(item => item.id), [source.id]);
+    assert.deepEqual(await core.conversationExperiments(chat, experimentId), finished);
+  } finally {
+    await core.close();
+    await rm(project, { recursive: true, force: true });
+  }
+});
+
+test('metric evidence retains full totals on ambiguous attribution and fences relation IDs by environment', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'stellane-metric-'));
+  const directory = join(root, 'state');
+  const source = await mkdtemp(join(root, 'project-'));
+  const other = await mkdtemp(join(root, 'other-'));
+  const metricsProvider: QueryProvider = {
+    ...provider,
+    async query(_connection, input) {
+      assert.match(input.sql, /LEFT JOIN ONLY "public"."stations" t1 ON k1.hits = 1/);
+      assert.deepEqual(input.values, ['alert']);
+      return { ...preview(), rows: [{
+        snapshot: '40:40:', safe: true, groupCount: '2',
+        groups: [{ bucket: 'north', orders: '1', amount: '0' }, { bucket: null, orders: '2', amount: '0' }],
+        counts: { total: '3', attributed: '1', unattributed: '2', nullAmounts: '0',
+          totalAmount: '0', attributedAmount: '0', unattributedAmount: '0' },
+        checks: [{ eligible: '3', missing: '0', ambiguous: '2', nullSourceKeys: '0' }],
+      }] };
+    },
+  };
+  const core = new StellaneCore(directory, metricsProvider);
+  try {
+    const original = core.createEnvironment({ connectionId: (await core.saveConnection(input(source))).id, name: 'events' });
+    const sibling = core.createEnvironment({ connectionId: (await core.saveConnection(input(source))).id, name: 'sibling' });
+    const id = randomUUID();
+    const sourceRunId = randomUUID();
+    const store = new Store(directory);
+    try {
+      store.put('knowledge', { id, environmentId: original.id, key: 'relation', version: 1, dependencyFingerprint: 'demo',
+        fact: { kind: 'join', from: { schema: 'public', table: 'events', columns: ['station'] },
+          to: { schema: 'public', table: 'stations', columns: ['external_key'] }, cardinality: 'many-to-one',
+          source: { rows: '3', nullRows: '0', duplicateKeys: '1' }, target: { rows: '2', nullRows: '0', duplicateKeys: '0' }, unmatchedRows: '0' },
+        evidence: { runId: sourceRunId, contextId: randomUUID(), observedAt: new Date().toISOString(), method: 'join-profile', snapshot: '39:39:' },
+      });
+    } finally { store.close(); }
+    const agent: Actor = { kind: 'agent', id: 'metric-agent', projectPath: source };
+    const spec = { environmentId: original.id, relationshipIds: [id], groupColumn: 'area', name: '区域告警',
+      filter: { column: 'kind', value: 'alert' } };
+    await assert.rejects(core.metric(spec, { ...agent, projectPath: other }), /无权/);
+    await assert.rejects(core.metric({ ...spec, environmentId: sibling.id }, agent), /当前环境/);
+    const run = await core.metric(spec, agent);
+    assert.equal(run.metric?.status, 'unverified');
+    assert.equal(run.metric?.snapshot, '40:40:');
+    assert.equal(run.metric?.counts?.total, '3');
+    assert.equal(run.metric?.checks?.[0]?.ambiguous, '2');
+    assert.equal(run.metric?.plan.relationships[0]?.sourceRunId, sourceRunId);
+    assert.deepEqual(run.preview?.columns, ['归属', '记录数']);
+    assert.deepEqual(core.evidence(run.id), run);
+    assert.equal((await core.metric({ ...spec, name: '设备区域事件数' }, agent)).metric?.version, run.metric?.version);
+  } finally {
+    await core.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });

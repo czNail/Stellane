@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Run, Snapshot } from '../shared/models.ts';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { Environment, ExperimentDetail, Run, Snapshot } from '../shared/models.ts';
 import { CatalogPanel } from './catalog.tsx';
 import { Connections } from './connections.tsx';
 import { EnvironmentDialog, type EnvironmentAction } from './environment.tsx';
-import { Explore, type Conversation, type ExploreMode } from './explore.tsx';
+import { Explore, runStatus, type Conversation, type ExploreMode } from './explore.tsx';
+import { ExperimentList, ExperimentView, StartExperiment } from './experiments.tsx';
 import { ActionDialog, environmentLabel, environmentTree, message, type Api } from './workspace-ui.tsx';
+import { RunEvidence } from './evidence.tsx';
 
-const empty: Snapshot = { connections: [], environments: [], runs: [], providers: [], operations: [], deliveries: [] };
-const pages = { explore: '探索', catalog: '数据目录', connections: '连接' };
-type Page = keyof typeof pages;
+const empty: Snapshot = { connections: [], environments: [], runs: [], providers: [], operations: [], deliveries: [], experiments: [] };
+const pages = { experiments: '任务与结果', catalog: '数据目录', explore: '探索' };
+type Page = keyof typeof pages | 'connections' | 'evidence';
 
 function useSnapshot(api: Api) {
   const [data, setData] = useState(empty);
@@ -33,21 +35,41 @@ function useSnapshot(api: Api) {
   return { data, loading, error, refresh };
 }
 
-export function Panel({ api, openConversation }: { api: Api; openConversation: Conversation }) {
+export function Panel({ api, openConversation, openSession, openEvidence, evidenceNavigation }: {
+  api: Api; openConversation: Conversation; openSession: (sessionId: string) => void;
+  openEvidence: (id: string) => void;
+  evidenceNavigation: { read: () => { id: string } | undefined; subscribe: (fn: () => void) => () => void; clear: () => void };
+}) {
   const { data, loading, error, refresh } = useSnapshot(api);
-  const [page, setPage] = useState<Page>('explore');
-  const [mode, setMode] = useState<ExploreMode>('ask');
+  const evidence = useSyncExternalStore(evidenceNavigation.subscribe, evidenceNavigation.read);
+  const [page, setPage] = useState<Page>('experiments');
+  const [mode, setMode] = useState<ExploreMode>('sql');
   const [selected, setSelected] = useState('');
   const [focusRun, setFocusRun] = useState<Run>();
+  const [experimentId, setExperimentId] = useState('');
+  const [initialExperiment, setInitialExperiment] = useState<ExperimentDetail>();
+  const [starting, setStarting] = useState<Environment>();
   const [dialog, setDialog] = useState<{ action: EnvironmentAction; connectionId?: string }>();
   const [operationsOpen, setOperationsOpen] = useState(false);
   const [reconciling, setReconciling] = useState('');
   const [operationError, setOperationError] = useState('');
   const menu = useRef<HTMLDetailsElement>(null);
   const surface = useRef<HTMLElement>(null);
-  const environment = data.environments.find(item => item.id === selected) ?? data.environments[0];
-  const pending = data.operations.filter(item => item.status === 'pending' || item.status === 'unknown');
+  const environment = selected ? data.environments.find(item => item.id === selected) : data.environments.find(item => !item.experimentId);
+  const available = data.environments.filter(item => !item.experimentId || item.id === selected);
+  const pending = data.operations.filter(item => !item.environment.experimentId && (item.status === 'pending' || item.status === 'unknown'));
   const connection = data.connections.find(item => item.id === environment?.connectionId);
+  const canStart = !!environment?.stello && !environment.experimentId;
+  const showingEnvironment = page === 'explore' || page === 'catalog';
+  const recentRuns = page === 'experiments' && !experimentId
+    ? data.runs.filter(run => !run.purpose && available.some(item => item.id === run.environmentId && !item.experimentId)).slice(0, 8)
+    : [];
+
+  useEffect(() => {
+    if (!evidence) return;
+    setPage('evidence');
+    surface.current?.scrollTo({ top: 0 });
+  }, [evidence]);
 
   useEffect(() => {
     function dismissOnOutsidePress(event: PointerEvent) {
@@ -70,6 +92,8 @@ export function Panel({ api, openConversation }: { api: Api; openConversation: C
 
   function navigate(target: Page) {
     if (menu.current) menu.current.open = false;
+    if (target !== 'explore') setFocusRun(undefined);
+    if (target !== 'evidence') evidenceNavigation.clear();
     setPage(target);
     surface.current?.scrollTo({ top: 0 });
   }
@@ -83,6 +107,11 @@ export function Panel({ api, openConversation }: { api: Api; openConversation: C
     selectEnvironment(id);
     if (run) { setFocusRun(run); setMode('sql'); }
     navigate('explore');
+  }
+  function openExperiment(id: string, detail?: ExperimentDetail) {
+    setExperimentId(id);
+    setInitialExperiment(detail);
+    navigate('experiments');
   }
 
   function showAction(action: EnvironmentAction, connectionId?: string) {
@@ -109,44 +138,85 @@ export function Panel({ api, openConversation }: { api: Api; openConversation: C
       <header className="st-topbar"><h1>Stellane</h1>
         <nav className="st-main-nav" aria-label="Stellane 导航">{Object.entries(pages).map(([id, label]) =>
           <button key={id} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id as Page)}>{label}</button>)}</nav>
+        <button className="st-button st-quiet st-sources-button" aria-current={page === 'connections' ? 'page' : undefined} onClick={() => navigate('connections')}>数据源</button>
       </header>
       {error && <div className="st-row st-attention" role="alert"><span>{error}</span><button className="st-button" onClick={() => void refresh()}>重试</button></div>}
       {loading ? <p className="st-loading" role="status">正在加载 Stellane…</p> : <>
-        {page !== 'connections' && environment && <div className="st-environment-bar">
-          <label className="st-environment-select"><span>环境</span><select value={environment.id} onChange={event => selectEnvironment(event.target.value)}>
-            {environmentTree(data.environments).map(({ environment: item, depth }) => <option key={item.id} value={item.id}>
+        {showingEnvironment && available.length > 0 && <div className="st-environment-bar">
+          <label className="st-environment-select"><span>环境</span><select aria-label="环境" value={environment?.id ?? ''} onChange={event => selectEnvironment(event.target.value)}>
+            {!environment && <option value="">选择数据环境</option>}
+            {environmentTree(available).map(({ environment: item, depth }) => <option key={item.id} value={item.id}>
               {'　'.repeat(Math.min(depth, 4))}{depth ? '↳ ' : ''}{item.name} · {environmentLabel(item)}</option>)}
           </select></label>
-          <span className="st-environment-source">{environment.stello?.resource ?? connection?.database}</span>
+          <span className="st-environment-source">{environment?.stello?.resource ?? connection?.database}</span>
           <div className="st-actions st-environment-actions">
+            {environment?.experimentId && <button className="st-button" onClick={() => openExperiment(environment.experimentId!)}>返回任务</button>}
+            {page === 'explore' && canStart && <button className="st-button" onClick={() => setStarting(environment)}>开始实验</button>}
             {pending.length > 0 && <button className="st-button st-quiet" onClick={() => setOperationsOpen(true)}>分支操作 {pending.length}</button>}
-            <details className="st-menu" ref={menu}><summary className="st-button">环境操作</summary><div className="st-menu-body">
+            {environment && !environment.experimentId && <details className="st-menu" ref={menu}><summary className="st-button">环境操作</summary><div className="st-menu-body">
               {data.connections.length > 0 && <button onClick={() => showAction('create')}>创建环境</button>}
               {environment.stello && <button onClick={() => showAction(environment.mode === 'fixed' ? 'fork' : 'checkpoint')}>
                 {environment.mode === 'fixed' ? '派生可写分支' : '固定当前状态'}</button>}
               {environment.access === 'read-write' && environment.parentEnvironmentId && <button onClick={() => showAction('deliver')}>交付方案</button>}
               <button onClick={() => navigate('connections')}>管理连接</button>
-            </div></details>
+            </div></details>}
           </div>
         </div>}
         <div className="st-page">
           {page === 'connections' && <Connections api={api} data={data} refresh={refresh}
             onOpen={environment => openEnvironment(environment.id)} onCreate={id => showAction('create', id)} />}
-          {page !== 'connections' && !environment && <section className="st-empty"><h2>{data.connections.length ? '创建查询环境' : '连接数据，开始探索'}</h2>
+          {showingEnvironment && selected && !environment && <section className="st-empty"><h2>原环境已不可用</h2>
+            <p>请重新选择数据环境，或从任务详情打开保留的固定结果。</p>
+            <button className="st-button" onClick={() => navigate('experiments')}>任务与结果</button></section>}
+          {showingEnvironment && !selected && !environment && <section className="st-empty"><h2>{data.connections.length ? '创建查询环境' : '连接数据，开始探索'}</h2>
               <p>{data.connections.length ? '选择一个 PostgreSQL 连接，为 Agent 和 SQL 查询创建环境。' : '接入 PostgreSQL 或 Stello 后，可以提问、查询和查看数据目录。'}</p>
               <button className="st-button st-primary" onClick={() => data.connections.length ? showAction('create') : navigate('connections')}>
                 {data.connections.length ? '创建环境' : '连接数据'}</button>
               {pending.length > 0 && <button className="st-button" onClick={() => setOperationsOpen(true)}>查看分支操作</button>}
             </section>}
-          {page === 'catalog' && environment && <CatalogPanel key={environment.id} api={api} environment={environment} onExplore={() => navigate('explore')} />}
+          {page === 'experiments' && (experimentId ? <ExperimentView key={experimentId} id={experimentId} initial={initialExperiment}
+            api={api} refresh={refresh} openConversation={openConversation} openSession={openSession} openEvidence={openEvidence} onBack={() => setExperimentId('')}
+            onSql={(target, run) => { setMode('sql'); openEnvironment(target.id, run); }} />
+            : <div className="st-stack">
+              <div className="st-page-heading"><h2>任务与结果</h2>
+                {pending.length > 0 && <button className="st-button" onClick={() => setOperationsOpen(true)}>分支操作 {pending.length}</button>}
+              </div>
+              {available.length === 0 ? <section className="st-empty"><h3>为项目接入数据</h3>
+                <p>接入 PostgreSQL 或 Stello 后，可在该项目的 Harness 对话里直接提问。</p>
+                <button className="st-button st-primary" onClick={() => navigate('connections')}>管理数据源</button>
+              </section> : <section className="st-stack st-task-section" aria-label="近期执行">
+                <h3>近期执行</h3>
+                {recentRuns.length === 0
+                  ? <p className="st-muted">在项目对话中提问，Stellane 执行的查询会显示在这里。</p>
+                  : <div className="st-history">{recentRuns.map(run => {
+                    const source = available.find(item => item.id === run.environmentId);
+                    return <button key={run.id} onClick={() => openEvidence(run.id)}>
+                      <span className={`st-status st-${run.status}`}>{runStatus[run.status]}</span>
+                      <code title={run.metric?.plan.name ?? run.sql}>{run.metric?.plan.name ?? run.sql}</code>
+                      <span className="st-muted st-run-source" title={source?.name}>{source?.name}</span>
+                      <time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString()}</time>
+                    </button>;
+                  })}</div>}
+              </section>}
+              <ExperimentList experiments={data.experiments} environments={available} onOpen={openExperiment} />
+            </div>)}
+          {page === 'evidence' && evidence && <RunEvidence key={evidence.id} id={evidence.id} api={api} environments={data.environments}
+            openEvidence={openEvidence} openConversation={openConversation} onBack={() => navigate('experiments')} />}
+          {page === 'catalog' && environment && <CatalogPanel key={environment.id} api={api} environment={environment}
+            onExplore={() => navigate('explore')} openEvidence={openEvidence} />}
           {environment && <div hidden={page !== 'explore'}>
             <Explore key={`${environment.id}:${focusRun?.id ?? ''}`} api={api} environment={environment} data={data} mode={mode} onMode={setMode}
               refresh={refresh} openConversation={openConversation} onCatalog={() => navigate('catalog')} onEnvironment={openEnvironment} focusRun={focusRun} />
           </div>}
         </div>
       </>}
+      {starting && <StartExperiment source={starting} api={api} onClose={() => setStarting(undefined)} onStarted={detail => {
+        setStarting(undefined);
+        openExperiment(detail.experiment.id, detail);
+        void refresh();
+      }} />}
       {dialog && <EnvironmentDialog action={dialog.action} api={api} data={data} environment={environment} initialConnection={dialog.connectionId}
-        onDone={async (created, run) => { setDialog(undefined); openEnvironment(created.id, run); await refresh(); }}
+        onDone={async (created, run) => { await refresh(); setDialog(undefined); openEnvironment(created.id, run); }}
         onPending={async requestId => {
           const snapshot = await refresh();
           const unresolved = snapshot?.operations.some(item => item.actor.callId === requestId

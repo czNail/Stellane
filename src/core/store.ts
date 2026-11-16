@@ -1,12 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BranchOperation, Connection, Delivery, Environment, Run, StelloSource } from '../shared/models.ts';
+import type { BranchOperation, BranchRemoval, Connection, ConversationScope, Delivery, Environment, Experiment, Run, StelloSource } from '../shared/models.ts';
 import type { CatalogImport, ContextRecord, SemanticDefinition } from '../shared/context-models.ts';
 import type { ProfiledKnowledge } from '../shared/knowledge-models.ts';
 
 interface Records { connections: Connection; environments: Environment; runs: Run; providers: StelloSource; operations: BranchOperation; deliveries: Delivery;
-  contexts: ContextRecord; definitions: SemanticDefinition; catalogImports: CatalogImport; knowledge: ProfiledKnowledge }
+  contexts: ContextRecord; definitions: SemanticDefinition; catalogImports: CatalogImport; knowledge: ProfiledKnowledge;
+  experiments: Experiment; scopes: ConversationScope; removals: BranchRemoval }
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -28,8 +29,11 @@ export class Store {
       CREATE INDEX IF NOT EXISTS definitions_scope ON definitions(json_extract(body,'$.projectPath'),json_extract(body,'$.dataSourceId'));
       CREATE TABLE IF NOT EXISTS catalogImports (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS knowledge (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS experiments (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS scopes (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS removals (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS knowledge_environment ON knowledge(json_extract(body,'$.environmentId'));
-      PRAGMA user_version=4;`);
+      PRAGMA user_version=5;`);
     const unfinished = this.db.prepare("SELECT body FROM runs WHERE json_extract(body, '$.status') = 'running'").all();
     for (const row of unfinished) {
       const run = JSON.parse(row.body as string) as Run;
@@ -58,11 +62,32 @@ export class Store {
     return row ? JSON.parse(row.body as string) : undefined;
   }
   environmentCount(projectPath: string): number {
-    const environments = this.db.prepare("SELECT count(*) AS n FROM environments WHERE json_extract(body, '$.projectPath') = ?").get(projectPath)!;
+    const environments = this.db.prepare("SELECT count(*) AS n FROM environments WHERE json_extract(body, '$.projectPath') = ? AND json_extract(body, '$.removedAt') IS NULL").get(projectPath)!;
     const pending = this.db.prepare(`SELECT count(*) AS n FROM operations o
       WHERE json_extract(o.body, '$.environment.projectPath') = ? AND json_extract(o.body, '$.status') IN ('pending','unknown')
       AND NOT EXISTS (SELECT 1 FROM environments e WHERE e.id = json_extract(o.body, '$.environment.id'))`).get(projectPath)!;
     return Number(environments.n) + Number(pending.n);
+  }
+  environments(): Environment[] {
+    return this.db.prepare("SELECT body FROM environments WHERE json_extract(body,'$.removedAt') IS NULL ORDER BY rowid DESC LIMIT 500")
+      .all().map(row => JSON.parse(row.body as string));
+  }
+  experimentRuns(environmentId: string, unresolved = false): Run[] {
+    const status = unresolved ? "AND json_extract(body,'$.status') = 'unknown'" : "AND json_extract(body,'$.purpose') IS NULL";
+    return this.db.prepare(`SELECT body FROM runs WHERE json_extract(body,'$.environmentId') = ? ${status} ORDER BY rowid DESC LIMIT 30`)
+      .all(environmentId).map(row => JSON.parse(row.body as string));
+  }
+  conversationExperiments(projectPath: string, sessionId: string): Experiment[] {
+    return this.db.prepare(`SELECT body FROM experiments
+      WHERE json_extract(body,'$.projectPath') = ? AND json_extract(body,'$.sessionId') = ?
+      ORDER BY rowid DESC LIMIT 20`).all(projectPath, sessionId).map(row => JSON.parse(row.body as string));
+  }
+  openConversationExperiment(projectPath: string, sessionId: string, sourceId: string, name: string): Experiment | undefined {
+    const row = this.db.prepare(`SELECT body FROM experiments
+      WHERE json_extract(body,'$.projectPath') = ? AND json_extract(body,'$.sessionId') = ?
+      AND json_extract(body,'$.sourceId') = ? AND json_extract(body,'$.name') = ?
+      AND json_extract(body,'$.status') != 'closed' ORDER BY rowid DESC LIMIT 1`).get(projectPath, sessionId, sourceId, name);
+    return row ? JSON.parse(row.body as string) : undefined;
   }
   definitions(projectPath: string, dataSourceId: string): SemanticDefinition[] {
     return this.db.prepare("SELECT body FROM definitions WHERE json_extract(body,'$.projectPath')=? AND json_extract(body,'$.dataSourceId')=? ORDER BY rowid DESC")

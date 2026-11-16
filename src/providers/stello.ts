@@ -4,7 +4,7 @@ import { request } from 'node:https';
 import { setTimeout } from 'node:timers/promises';
 import type { ClientConfig } from 'pg';
 import { z } from 'zod';
-import type { BranchBinding, BranchIdentity, BranchOperation, StelloSource } from '../shared/models.ts';
+import type { BranchBinding, BranchIdentity, BranchOperation, BranchRemoval, StelloSource } from '../shared/models.ts';
 import { PostgresProvider, secret } from './postgres.ts';
 
 const identitySchema = z.object({ service: z.string().min(1), slot: z.number().int().nonnegative(), incarnation: z.number().int().positive() });
@@ -14,6 +14,8 @@ const branchSchema = z.object({
   complete: z.boolean(), state: z.string(), creation_id: z.string().nullable().optional(),
   parent_identity: identitySchema.nullable().optional(),
 });
+const removalStatus = z.object({ identity: identitySchema, resource_id: z.string(), revision: z.number().int().nonnegative(),
+  state: z.string(), complete: z.boolean(), operation_id: z.string().nullish() });
 const configSchema = z.object({ endpoint: z.url().refine(value => {
   const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password;
 }), ca: z.string().min(1), token_file: z.string().min(1) });
@@ -133,6 +135,21 @@ export class StelloProvider {
       mode: operation.kind === 'checkpoint' ? 'fixed' : 'writable', no_compute: false,
       lsn: 'latest', at: null, node: null, spec: null, extensions: [] };
     prepared(body);
+    return this.submitCreation(source, operation, body, signal);
+  }
+  async resumeCreation(source: StelloSource, operation: BranchOperation, signal: AbortSignal): Promise<BranchBinding> {
+    const body = operation.request;
+    if (!body) throw new Error('原派生请求尚未取得准入。');
+    try {
+      const binding = await this.reconcile(source, operation, signal);
+      if (binding) return binding;
+    } catch (error) {
+      if (!(error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found') && !isBusy(error)) throw error;
+    }
+    // Resume the persisted ticket and its original identity on explicit task recovery.
+    return this.submitCreation(source, operation, body, signal);
+  }
+  private async submitCreation(source: StelloSource, operation: BranchOperation, body: Record<string, unknown>, signal: AbortSignal): Promise<BranchBinding> {
     try { await this.operation(source, body, signal); }
     catch (error) {
       // A busy reply can follow durable admission. Observe this exact ticket;
@@ -166,5 +183,39 @@ export class StelloProvider {
     if (!observed.complete || !['ready', 'stored', 'sleeping'].includes(observed.state)) return undefined;
     if (observed.fork_lsn === '0/0') throw new Error('Stello 未返回固定来源位置。');
     return this.binding(source, resource, observed, true);
+  }
+  async remove(source: StelloSource, binding: BranchBinding, id: string, saved: BranchRemoval | undefined,
+    persist: (removal: BranchRemoval) => void, signal: AbortSignal): Promise<void> {
+    if (!binding.managed) throw new Error('只能清理 Stellane 创建的分支。');
+    const name = encodeResource(binding.resource);
+    const inspect = async () => {
+      try {
+        const status = removalStatus.parse(await this.operation(source, { action: 'branch_get', name }, signal));
+        if (!sameIdentity(status.identity, binding.identity) || status.resource_id !== binding.resourceId) {
+          throw new Error('分支身份已变化，无法清理当前同名资源。');
+        }
+        return status;
+      } catch (error) {
+        if (error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found' && saved) return undefined;
+        throw error;
+      }
+    };
+    const before = await inspect();
+    if (!before || (before.state === 'deleted' && before.complete)) return;
+    const removal = saved ?? { id, name, identity: binding.identity, expected_revision: before.revision,
+      operation_id: id.replaceAll('-', '') };
+    if (before.revision !== removal.expected_revision && before.operation_id !== removal.operation_id) {
+      throw new Error('分支已执行其他管理操作，请核对原清理请求。');
+    }
+    if (!saved) { persist(removal); saved = removal; }
+    const { id: _id, ...request } = removal;
+    try { await this.operation(source, { action: 'branch_change', operation: 'delete', ...request }, signal); }
+    catch (error) {
+      const observed = await inspect().catch(() => { throw error; });
+      if (!observed || (observed.state === 'deleted' && observed.complete)) return;
+      throw error;
+    }
+    const after = await inspect();
+    if (after && !(after.state === 'deleted' && after.complete)) throw new Error('清理尚未完成，请继续核对原操作。');
   }
 }

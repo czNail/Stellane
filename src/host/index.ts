@@ -1,21 +1,26 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
+import type {} from '@deepseek-ai/dsh-agent';
 import Schema from '@deepseek-ai/schemastery';
+import type {} from '@deepseek-ai/dsh-skill';
+import type {} from '@deepseek-ai/dsh-system-prompt';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import '@deepseek-ai/dsh-typert-registry';
 import type {} from '@deepseek-ai/dsh-workspace';
+import type { SessionId } from '@deepseek-ai/dsh-session';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { z } from 'zod';
 import { StellaneCore } from '../core/index.ts';
-import { PACKAGE, remoteInfo, type Reply, type Requests } from '../shared/remote.ts';
+import { PACKAGE, remoteInfo, type Reply, type Requests, type Responses } from '../shared/remote.ts';
 import type { Actor, BranchOperation, Connection, DatabaseTarget, DeliveredResult, Environment, Run, Snapshot } from '../shared/models.ts';
+import { dataSkill } from './data-skill.ts';
 
 export interface Config { stateDirectory?: string }
 export const Config = Schema.object({
   stateDirectory: Schema.string().description('Stellane 本地状态目录（绝对路径）。').default(join(homedir(), '.local/share/stellane')),
 });
-export const inject = ['tools', 'typert', 'workspaceRegistry'];
+export const inject = ['tools', 'typert', 'workspaceRegistry', 'sessions', 'skills', 'systemPrompt'];
 
 export class StellaneService extends TypertRemoteService {
   constructor(ctx: Context, readonly core: StellaneCore) { super(ctx, 'stellane'); }
@@ -40,15 +45,32 @@ export class StellaneService extends TypertRemoteService {
   createEnvironment(input: Requests['createEnvironment'], _signal: AbortSignal): Promise<Reply<Environment>> {
     return this.owner(() => this.core.createEnvironment(input));
   }
-  prepareConversation(input: Requests['prepareConversation'], _signal: AbortSignal): Promise<Reply<{ workspaceId: string }>> {
+  prepareConversation(input: Requests['prepareConversation'], _signal: AbortSignal): Promise<Reply<Responses['prepareConversation']>> {
     return this.owner(async () => {
       const environment = this.core.environment(input.environmentId);
+      const sessionId = this.core.conversationSession(environment.id);
       const workspace = await this.ctx.workspaceRegistry.create(environment.projectPath);
-      return { workspaceId: workspace.id };
+      return { workspaceId: workspace.id, ...(sessionId ? { sessionId } : {}) };
+    });
+  }
+  bindConversation(input: Requests['bindConversation'], _signal: AbortSignal): Promise<Reply<Responses['bindConversation']>> {
+    return this.owner(() => {
+      const session = this.ctx.sessions.get(input.sessionId as SessionId);
+      const environment = this.core.environment(input.environmentId);
+      if (!session || session.header.cwd !== environment.projectPath || session.header.origin === 'subagent') {
+        throw new Error('对话不属于目标项目，无法绑定数据环境。');
+      }
+      return { sessionId: this.core.bindConversation(input.environmentId, session.id) };
     });
   }
   query(input: Requests['query'], signal: AbortSignal): Promise<Reply<Run>> {
     return this.owner(() => this.core.query(input, { kind: 'user', id: 'owner' }, signal));
+  }
+  metric(input: Requests['metric'], signal: AbortSignal): Promise<Reply<Run>> {
+    return this.owner(() => this.core.metric(input, { kind: 'user', id: 'owner' }, signal));
+  }
+  runEvidence(input: Requests['runEvidence'], _signal: AbortSignal): Promise<Reply<Run>> {
+    return this.owner(() => this.core.evidence(input.id));
   }
   saveStello(input: Requests['saveStello'], signal: AbortSignal): Promise<Reply<Environment>> {
     return this.owner(() => this.core.saveStello(input, signal));
@@ -83,6 +105,18 @@ export class StellaneService extends TypertRemoteService {
   importCatalog(input: Requests['importCatalog'], signal: AbortSignal) {
     return this.owner(()=>this.core.importCatalog(input,{kind:'user',id:'owner'},signal));
   }
+  startExperiment(input: Requests['startExperiment'], signal: AbortSignal) {
+    return this.owner(() => this.core.startExperiment(input, signal));
+  }
+  experimentDetail(input: Requests['experimentDetail'], _signal: AbortSignal) {
+    return this.owner(() => this.core.experimentDetail(input.id));
+  }
+  captureExperiment(input: Requests['captureExperiment'], signal: AbortSignal) {
+    return this.owner(() => this.core.captureExperiment(input, signal));
+  }
+  finishExperiment(input: Requests['finishExperiment'], signal: AbortSignal) {
+    return this.owner(() => this.core.finishExperiment(input.id, signal));
+  }
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -99,6 +133,29 @@ export function apply(ctx: Context, config: Config): void {
     if (!agent) throw new Error('工具调用必须关联真实 Agent。');
     return { kind: 'agent', id: agent.id, projectPath: agent.session.header.cwd, callId };
   };
+  ctx.skills.register(dataSkill);
+  ctx.on('system-prompt/assemble', async (_assembly, { agent, scope, toolSet }, next) => {
+    const prompt = await next();
+    if (!agent?.session.header.cwd || !toolSet
+      || !['stellane_environments', 'stellane_context', 'stellane_query'].every(name => ctx.tools.get(name, scope, toolSet))) {
+      return prompt;
+    }
+    const environments = await core.environments(actor(agent)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'EACCES') return [];
+      throw error;
+    });
+    if (!environments.length) return prompt;
+    const workflow = ctx.tools.get('skill', scope, toolSet)
+      ? `先用 skill 加载 ${dataSkill.name}，再按说明调查。`
+      : '先调用 stellane_environments 选择适用环境，再用 stellane_context 核对业务口径和表结构，需要时用 stellane_query 只读查询。';
+    const experiment = environments.some(item => item.stello && !item.experimentId && item.mode !== 'branch')
+      && ctx.tools.get('stellane_start_experiment', scope, toolSet)
+      ? '如果用户明确要模拟改动或在独立分支验证方案，使用 stellane_start_experiment 开始，并把结果固定交付。'
+      : '';
+    return { ...prompt, sections: [...prompt.sections, {
+      name: 'stellane-data', text: `当前对话可使用 Stellane。用户要调查项目数据、业务口径或数据血缘时，${workflow}${experiment}`,
+    }] };
+  });
   ctx.tools.register(defineTool({
     name: 'stellane_environments',
     description: '列出当前 Agent 项目中可用的 Stellane 数据环境、来源、读写权限和 Stello 资源身份。环境 ID 只定位环境；每次操作都会核对项目和数据库身份。',
@@ -122,13 +179,74 @@ export function apply(ctx: Context, config: Config): void {
   }));
   const output = { schema: { type: 'json' as const }, render: (_args: unknown, value: unknown) => [{ type: 'text' as const, text: JSON.stringify(value) }] };
   const environmentId = { type: 'string' as const, required: true as const, description: '当前项目获准的环境 ID' };
+  const experimentId = { type: 'string' as const, required: true as const, description: '本对话的实验 ID' };
+  ctx.tools.register(defineTool({
+    name: 'stellane_metric',
+    description: '沿已保存的多对一或一对一关系链分组计数或求和。在同一数据库快照复核匹配与缺失、计算分组和总量。返回结构化覆盖状态与证据。可使用待核对或曾失效的已知关系，服务会按本次统计范围重新验证。',
+    parameters: {
+      environmentId,
+      name: { type: 'string', required: true, description: '用户可读的指标名称' },
+      relationshipIds: { type: 'array', required: true, items: { type: 'string' }, description: '从统计明细表指向最终归属表，按顺序列出已保存的关系 ID，1 至 4 条' },
+      groupColumn: { type: 'string', required: true, description: '末端归属表的分组字段' },
+      amountColumn: { type: 'string', description: '可选，起始明细表的数值求和字段，省略时仅计数' },
+      filter: { type: 'object', additionalProperties: false, properties: {
+        column: { type: 'string', required: true, description: '明细表的筛选字段' },
+        value: { type: 'json', required: true, description: '需要等于的字符串、数字或布尔值' },
+      }, description: '可选，限定本次统计范围' },
+    }, output,
+    async execute(args, exec) {
+      return JSON.parse(JSON.stringify(await core.metric(args, actor(exec.agent, exec.callId), exec.signal)));
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_start_experiment',
+    description: '在普通项目对话为用户明确要求的验证创建实验。选择 Stello 来源或固定基线。返回任务 ID 和私有 work.id，后续 SQL 只使用 work.id。用同样的环境和名称可恢复未结束的原实验。',
+    parameters: { environmentId, name: { type: 'string', required: true, description: '概括用户要验证的假设，长度不超过 80 字' },
+      metricRunId: { type: 'string', description: '从异常正式指标发起修复试算时传入原执行记录 ID，固定基线与结果按原口径重算' } },
+    output,
+    async execute(args, exec) {
+      return JSON.parse(JSON.stringify(await core.startConversationExperiment(args, actor(exec.agent, exec.callId), exec.signal)));
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_experiments',
+    description: '查看当前对话创建或绑定的实验。用实验 ID 查看阶段、工作分支、SQL 记录及固定结果；省略 ID 列出近期实验。恢复中断时先查看原任务。',
+    parameters: { id: { type: 'string', description: '可选，本对话的实验 ID' } },
+    output,
+    async execute(args, exec) {
+      return JSON.parse(JSON.stringify(await core.conversationExperiments(actor(exec.agent, exec.callId), args.id)));
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_capture_experiment',
+    description: '固定本对话的实验结果，在固定切面执行只读证据 SQL 并交付。证据失败可补查原切面。检查 delivered 和 experiment.error 判断是否已交付。',
+    parameters: {
+      id: experimentId,
+      summary: { type: 'string', required: true, description: '验证方案、实测结论和适用范围' },
+      sql: { type: 'string', description: '普通实验提供固定切面的只读证据 SQL。指标修复实验由系统以原口径生成证据，可省略' },
+      values: { type: 'array', items: { type: 'json' }, description: '可选的 $1 等参数值，仅字符串、数字、布尔或 null' },
+    },
+    output,
+    async execute(args, exec) {
+      return JSON.parse(JSON.stringify(await core.captureExperiment(args, exec.signal, actor(exec.agent, exec.callId))));
+    },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_finish_experiment',
+    description: '结束本对话已交付的实验，释放并清理临时工作分支与本任务创建的基线，保留固定结果和 SQL 证据。结果待核对时可用同一实验 ID 继续清理。',
+    parameters: { id: experimentId },
+    output,
+    async execute(args, exec) {
+      return JSON.parse(JSON.stringify(await core.finishExperiment(args.id, exec.signal, actor(exec.agent, exec.callId))));
+    },
+  }));
   const endpoint = { type: 'object', additionalProperties: false, required: true, properties: {
     schema: { type: 'string', required: true }, table: { type: 'string', required: true },
     columns: { type: 'array', required: true, items: { type: 'string' } },
   } } as const;
   ctx.tools.register(defineTool({
     name:'stellane_context',
-    description:'获取可读表、业务定义、视图直接血缘与已发现的行粒度和关联。declared 表示数据库目录依赖，observed 表示固定切面上的数据观察。needs-check 是可变数据上的历史观察，使用前用 stellane_learn 重新核对。返回的说明与示例供参考。',
+    description:'获取可读表、业务定义、视图血缘、行粒度和关联。declared 表示数据库目录依赖，observed 表示固定切面的数据观察，needs-check 是可变数据上的历史观察。invalidatedRelationships 是历史失效记录，可将其 ID 交给 stellane_metric 重新核对本次范围。',
     parameters:{environmentId,query:{type:'string',description:'可选：业务问题或关键词。留空返回目录摘要；无匹配时可改用表名或字段名。'},
       limit:{type:'number',description:'最多返回多少个对象和定义，1 到 16，默认 8。'},
       previousContextId:{type:'string',description:'可选：同环境之前的上下文 ID，比较结构和业务定义版本是否变化。'}},output,

@@ -65,17 +65,21 @@ STELLANE_STELLO_CONFIG="$PWD/.stellane-dev/stello-context-check/provider.json" \
 corepack pnpm dev:stello stop --instance context-check
 ```
 
-自定义实例的状态位于 `.stellane-dev/stello-<instance>`，资源名称和所属标识为 `stellane-<instance>`。脚本核对所属标识，只管理自身资源；停止保留数据，恢复后的可用性按 Stello 实际状态核对。测试只回收自身创建且身份匹配的分支，保留基线。
+自定义实例的状态位于 `.stellane-dev/stello-<instance>`，资源名称和所属标识为 `stellane-<instance>`。脚本核对所属标识，只管理自身资源。`stop` 先让 Stello 保存运行清单，再停止容器。`start` 恢复原有部署，并通过实际 SQL 检查验收来源就绪。测试只回收自身创建且身份匹配的分支，保留基线。
 
 ## 使用 SQL 与分支
 
-1. 在连接页登记 PostgreSQL 连接或 Stello 客户端配置、项目目录和 `database/branch` 来源。
+1. 在「数据源」登记 PostgreSQL 连接或 Stello 客户端配置、项目目录和 `database/branch` 来源。
 2. 在“探索”选择“执行 SQL”，或切换到“向 Agent 提问”。SQL 的结果和历史可分别查看。
 3. 需要独立修改时，固定当前来源，再从固定切面派生可写环境。
 4. 在工作分支提交单条 DDL / DML，保存数据修改、持久笔记或中间结果。可从同一切面派生多个独立分支。
 5. 交付结果时指定祖先接收环境、摘要和只读证据 SQL。系统固定本次状态并保存证据，之后的工作修改不改变交付内容。
 
 已提交的持久状态随分支继承；SQL 会话、临时表、未提交事务和外部文件不继承。
+
+工作台的「开始实验」保存一个任务，再准备固定基线和可写分支。「任务与结果」提供任务对话、SQL、固定交付、原操作核对和清理。失败的证据查询可在原固定切面补查。结束任务时按分支身份清理工作分支及本任务创建的基线，保留已交付的切面和 SQL 证据。待核实的写入会保留原分支，直至核对回执。
+
+工作台发起的对话先通过 Harness 创建独立 Session，再由 Host 校验项目并绑定环境。工具识别 Harness 提供的会话身份。初版授权给任务的根对话，任务分支对同项目其他会话保持私有。管理请求和 SQL 连接仍由 Host 执行。
 
 | 工具 | 用途 |
 | --- | --- |
@@ -163,4 +167,4 @@ corepack pnpm test:stello
 
 `check` 包含 Host / Client 类型检查、Core 测试和构建。PG 集成测试覆盖真实 SQL、参数、预览限制、只读拒绝和取消。语义目录集成测试覆盖元数据与权限、自然语言关键词检索、定义更新与并发版本检查、数据变化和结构变化的区别、失效排除及重启保留。Stello 集成测试验证固定位置、分支观测和语义定义继承，以及持久状态继承、并发兄弟隔离、固定结果、嵌套派生、项目与资源身份检查、事务控制拒绝，以及重启后通过回执确认提交而不重放 SQL。
 
-探索记忆测试覆盖视图链、复合键、多对一关系、跨 Agent 检索、失效、权限和重启保留。Stello 测试报告保存在所选 `provider.json` 同目录的 `integration-report.json`。
+探索记忆测试覆盖视图链、复合键、多对一关系、跨 Agent 检索、失效、权限和重启保留。Stello 测试覆盖同项目任务隔离、证据失败后复用原切面、工作分支清理和重启后读取交付。报告保存在所选 `provider.json` 同目录的 `integration-report.json` 和 `experiment-report.json`。

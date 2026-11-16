@@ -46,7 +46,7 @@ export interface ProfiledKnowledge {
   fact: ProfiledFact;
   evidence: KnowledgeEvidence;
   dependencyFingerprint: string;
-  invalidation?: { reason: string; evidence: KnowledgeEvidence };
+  invalidation?: { reason: string; evidence: KnowledgeEvidence; unmatchedRows?: string };
 }
 
 export type KnowledgeItem = { id: string; fact: ViewLineage; evidence: KnowledgeEvidence; status: 'declared' }

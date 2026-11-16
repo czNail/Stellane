@@ -15,16 +15,38 @@ const configPath = process.env.STELLANE_STELLO_CONFIG ?? fileURLToPath(new URL('
 const input = JSON.parse(await readFile(configPath, 'utf8'));
 const owner: Actor = { kind: 'user', id: 'owner' };
 
+function rememberBranches(core: StellaneCore, owned: Map<string, BranchIdentity>) {
+  const { environments, operations } = core.snapshot();
+  for (const env of environments) if (env.stello?.managed) owned.set(env.stello.resource, env.stello.identity);
+  for (const op of operations) if (op.request) owned.set(op.resource, op.request.identity as BranchIdentity);
+}
+
+async function cleanBranches(branches: StelloProvider, provider: StelloSource, owned: Map<string, BranchIdentity>) {
+  for (const [resource, identity] of [...owned].reverse()) {
+    const signal = AbortSignal.timeout(60000);
+    const name = encodeResource(resource);
+    let observed;
+    try { observed = await branches.operation(provider, { action: 'branch_get', name }, signal) as { identity: BranchIdentity; revision: number; state: string }; }
+    catch (error) { if (error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found') continue; throw error; }
+    assert(sameIdentity(observed.identity, identity), 'Refuse cleanup of a replacement identity');
+    if (observed.state === 'deleted') continue;
+    await branches.operation(provider, { action: 'branch_change', name, identity, expected_revision: observed.revision,
+      operation: 'delete', operation_id: randomUUID().replaceAll('-', '') }, signal);
+    while (true) {
+      const state = await branches.operation(provider, { action: 'branch_get', name }, signal) as { state: string; complete: boolean };
+      if (state.state === 'deleted' && state.complete) break;
+      await setTimeout(400, undefined, { signal });
+    }
+  }
+}
+
 test('real Stello inheritance, sibling isolation, fixed delivery and unknown-write reconciliation', { timeout: 300000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'stellane-branches-'));
   const branches = new StelloProvider();
   let core = new StellaneCore(root);
   let provider: StelloSource | undefined;
   const owned = new Map<string, BranchIdentity>();
-  const remember = () => {
-    for (const env of core.snapshot().environments) if (env.stello?.managed) owned.set(env.stello.resource, env.stello.identity);
-    for (const op of core.snapshot().operations) if (op.request) owned.set(op.resource, op.request.identity as BranchIdentity);
-  };
+  const remember = () => rememberBranches(core, owned);
   const query = async (environment: Environment, sql = 'SELECT value FROM sample_data WHERE id=1') => {
     const run = await core.query({ environmentId: environment.id, sql }, owner);
     assert.equal(run.status, 'succeeded', run.error); return run;
@@ -129,22 +151,72 @@ test('real Stello inheritance, sibling isolation, fixed delivery and unknown-wri
   } finally {
     remember(); await core.close();
     // Only test-created resource identities are eligible for cleanup.
-    if (provider) for (const [resource, identity] of [...owned].reverse()) {
-      const signal = AbortSignal.timeout(60000);
-      const name = encodeResource(resource);
-      let observed;
-      try { observed = await branches.operation(provider, { action: 'branch_get', name }, signal) as { identity: BranchIdentity; revision: number; state: string }; }
-      catch (error) { if (error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found') continue; throw error; }
-      assert(sameIdentity(observed.identity, identity), 'Refuse cleanup of a replacement identity');
-      if (observed.state === 'deleted') continue;
-      await branches.operation(provider, { action: 'branch_change', name, identity, expected_revision: observed.revision,
-        operation: 'delete', operation_id: randomUUID().replaceAll('-', '') }, signal);
-      while (true) {
-        const state = await branches.operation(provider, { action: 'branch_get', name }, signal) as { state: string; complete: boolean };
-        if (state.state === 'deleted' && state.complete) break;
-        await setTimeout(400, undefined, { signal });
-      }
-    }
+    if (provider) await cleanBranches(branches, provider, owned);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('real Stello experiment scopes SQL, retries evidence on its fixed state and preserves delivery through cleanup', { timeout: 300000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'stellane-real-experiment-'));
+  const branches = new StelloProvider();
+  let core = new StellaneCore(root);
+  let provider: StelloSource | undefined;
+  const owned = new Map<string, BranchIdentity>();
+  const sql = 'SELECT value FROM sample_data WHERE id = 1';
+  const value = async (environmentId: string) => {
+    const run = await core.query({ environmentId, sql }, owner);
+    assert.equal(run.status, 'succeeded', run.error);
+    return run.preview?.rows[0]?.value;
+  };
+  try {
+    const source = await core.saveStello(input);
+    provider = core.snapshot().providers[0]!;
+    const request = { id: randomUUID(), name: 'Experiment migration comparison', environmentId: source.id };
+    const started = await core.startExperiment(request);
+    assert.equal(started.experiment.status, 'active', started.experiment.error);
+    const working = started.work!;
+    const actor: Actor = { kind: 'agent', id: 'experiment-session', projectPath: input.projectPath, callId: 'experiment-write' };
+    const outsider: Actor = { ...actor, id: 'other-session-in-same-project' };
+    assert.equal(core.bindConversation(working.id, actor.id), actor.id);
+    await assert.rejects(core.query({ environmentId: working.id, sql }, outsider), /无权/);
+    const write = await core.write({ environmentId: working.id, sql: 'UPDATE sample_data SET value=180 WHERE id=1 RETURNING value' }, actor);
+    assert.equal(write.status, 'succeeded', write.error);
+    assert.equal(write.preview?.rows[0]?.value, 180);
+    assert.equal(await value(source.id), 120);
+
+    const summary = 'Fixed result on the experiment branch';
+    const unresolved = await core.captureExperiment({ id: request.id, summary, sql: 'SELECT missing_column FROM sample_data' });
+    assert(unresolved.result, unresolved.experiment.error);
+    assert.equal(unresolved.delivered, undefined);
+    assert.match(unresolved.experiment.error ?? '', /原切面/);
+    const captured = await core.captureExperiment({ id: request.id, summary, sql });
+    assert(captured.delivered, captured.experiment.error);
+    assert.equal(captured.result?.id, unresolved.result.id);
+    assert.equal(captured.delivered.run.preview?.rows[0]?.value, 180);
+    const later = await core.write({ environmentId: working.id, sql: 'UPDATE sample_data SET value=181 WHERE id=1' }, owner);
+    assert.equal(later.status, 'succeeded', later.error);
+    assert.equal(await value(captured.result!.id), 180);
+
+    const ended = await core.finishExperiment(request.id);
+    assert.equal(ended.experiment.status, 'closed', ended.experiment.error);
+    assert(ended.work?.removedAt);
+    assert(ended.baseline?.removedAt);
+    await assert.rejects(core.query({ environmentId: working.id, sql }, actor), /无权/);
+    await core.close();
+    core = new StellaneCore(root);
+    assert.equal(core.experimentDetail(request.id).delivered?.run.id, captured.delivered.run.id);
+    assert.equal(await value(captured.result!.id), 180);
+    assert.equal(await value(source.id), 120);
+    await writeFile(join(dirname(configPath), 'experiment-report.json'), JSON.stringify({
+      taskId: request.id, baselineLsn: started.baseline!.stello!.forkLsn, resultLsn: captured.result!.stello!.forkLsn,
+      sourceValue: 120, retainedValue: 180, workValueBeforeCleanup: 181, taskStatus: ended.experiment.status,
+      checks: ['same-project-session-fence', 'real-write', 'reuse-original-evidence-cut', 'confirmed-work-and-baseline-cleanup',
+        'retained-result-and-source-after-restart'],
+    }, null, 2), { mode: 0o600 });
+  } finally {
+    rememberBranches(core, owned);
+    await core.close();
+    if (provider) await cleanBranches(branches, provider, owned);
     await rm(root, { recursive: true, force: true });
   }
 });

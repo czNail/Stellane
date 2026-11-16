@@ -1,14 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
-import { connectionInput, deliverInput, deriveInput, environmentInput, queryInput, stelloInput } from '../shared/models.ts';
-import type { Actor, BranchBinding, BranchOperation, Connection, DatabaseTarget, DeliveredResult, Delivery, Environment, QueryInput, Run, Snapshot, StelloSource } from '../shared/models.ts';
+import { connectionInput, deliverInput, deriveInput, environmentInput, experimentInput, experimentResultInput, experimentSourceInput, queryInput, stelloInput } from '../shared/models.ts';
+import type { Actor, BranchBinding, BranchOperation, Connection, DatabaseTarget, DeliveredResult, Delivery, Environment, Experiment, ExperimentDetail, ExperimentInput, QueryInput, Run, Snapshot, StelloSource } from '../shared/models.ts';
 import { PostgresProvider, WriteOutcomeError, type QueryProvider } from '../providers/postgres.ts';
 import { StelloProvider } from '../providers/stello.ts';
 import { Store } from './store.ts';
 import { SemanticCatalog } from './catalog.ts';
 import type { CatalogView, ContextResult, SemanticDefinition } from '../shared/context-models.ts';
 import type { LearnResult } from '../shared/knowledge-models.ts';
+import { metricInput, type MetricPlan } from '../shared/metric-models.ts';
+import { metricSql, withMetric } from './metric.ts';
+
+const owner: Actor = { kind: 'user', id: 'owner' };
 
 function invocationId(actor: Actor, operation: string): string {
   if (!actor.callId) return randomUUID();
@@ -23,6 +27,7 @@ export class StellaneCore {
   private readonly shutdown = new AbortController();
   private readonly active = new Set<Promise<unknown>>();
   private readonly modifying = new Set<string>();
+  private readonly activeRuns = new Map<string, Set<string>>();
   private readonly provider: QueryProvider;
   private readonly branches: StelloProvider;
   private readonly catalog: SemanticCatalog;
@@ -32,9 +37,9 @@ export class StellaneCore {
       (environmentId, sql, actor, signal, purpose) => this.run(queryInput.parse({ environmentId, sql }), actor, signal, false, purpose));
   }
   snapshot(): Snapshot {
-    return { connections: this.store.list('connections'), environments: this.store.list('environments'),
+    return { connections: this.store.list('connections'), environments: this.store.environments(),
       runs: this.store.list('runs', 100), providers: this.store.list('providers'),
-      operations: this.store.list('operations', 100), deliveries: this.store.list('deliveries', 100) };
+      operations: this.store.list('operations', 100), deliveries: this.store.list('deliveries', 100), experiments: this.store.list('experiments') };
   }
   private async project(path: string): Promise<string> {
     if (!isAbsolute(path)) throw new Error('项目目录必须是绝对路径。');
@@ -42,8 +47,8 @@ export class StellaneCore {
     if (!(await stat(projectPath)).isDirectory()) throw new Error('项目路径必须是目录。');
     return projectPath;
   }
-  private capacity(projectPath: string): void {
-    if (this.store.environmentCount(projectPath) >= 16) throw new Error('项目已登记 16 个环境或待核实派生，请核对资源后继续。');
+  private capacity(projectPath: string, additional = 1): void {
+    if (this.store.environmentCount(projectPath) + additional > 16) throw new Error('项目最多保留 16 个环境或待核实派生，请清理资源后继续。');
   }
   async saveConnection(value: unknown): Promise<Connection> {
     const input = connectionInput.parse(value);
@@ -87,15 +92,48 @@ export class StellaneCore {
   }
   private async authorize(id: string, actor: Actor): Promise<Environment> {
     const environment = this.environment(id);
-    if (actor.kind === 'agent' && environment.projectPath !== await this.agentProject(actor)) {
-      throw new Error('当前 Agent 无权使用这个项目的数据环境。');
+    if (actor.kind === 'agent') {
+      const projectPath = await this.agentProject(actor);
+      if (environment.projectPath !== projectPath || !this.agentCanUse(environment, actor)) {
+        throw new Error('当前 Agent 无权使用这个数据环境。');
+      }
     }
+    if (environment.removedAt) throw new Error('该分支已清理，请打开保留的固定结果。');
     return environment;
   }
+  private agentCanUse(environment: Environment, actor: Actor): boolean {
+    const scope = this.store.find('scopes', actor.id);
+    if (scope && scope.environmentId !== environment.id) return false;
+    if (!environment.experimentId) return true;
+    const experiment = this.store.get('experiments', environment.experimentId);
+    return experiment.sessionId === actor.id && experiment.workId === environment.id && experiment.status === 'active';
+  }
   async environments(actor: Actor): Promise<Environment[]> {
-    if (actor.kind === 'user') return this.store.list('environments');
+    if (actor.kind === 'user') return this.store.environments();
     const projectPath = await this.agentProject(actor);
-    return this.store.list('environments').filter(environment => environment.projectPath === projectPath);
+    return this.store.environments().filter(environment => environment.projectPath === projectPath && this.agentCanUse(environment, actor));
+  }
+  conversationSession(environmentId: string): string | undefined {
+    const environment = this.environment(environmentId);
+    if (environment.removedAt) throw new Error('该分支已清理。');
+    if (!environment.experimentId) return undefined;
+    const experiment = this.store.get('experiments', environment.experimentId);
+    if (experiment.status !== 'active' || experiment.workId !== environmentId) throw new Error('这个环境无法开启任务对话。');
+    return experiment.sessionId;
+  }
+  bindConversation(environmentId: string, sessionId: string): string {
+    const saved = this.conversationSession(environmentId);
+    const environment = this.environment(environmentId);
+    const experiment = environment.experimentId ? this.store.get('experiments', environment.experimentId) : undefined;
+    const previous = this.store.find('scopes', sessionId);
+    if (previous && previous.environmentId !== environmentId) throw new Error('对话已绑定到另一个数据环境。');
+    if (saved) return saved;
+    if (experiment && this.modifying.has(experiment.id)) throw new Error('任务正在处理操作，请稍后打开对话。');
+    this.store.transaction(() => {
+      this.store.put('scopes', { id: sessionId, environmentId });
+      if (experiment) this.store.put('experiments', { ...experiment, sessionId });
+    });
+    return sessionId;
   }
   private track<T>(work: (signal: AbortSignal) => Promise<T>, signal = new AbortController().signal): Promise<T> {
     if (this.shutdown.signal.aborted) return Promise.reject(new Error('Stellane Host 正在停止。'));
@@ -108,6 +146,38 @@ export class StellaneCore {
   }
   query(value: unknown, actor: Actor, signal?: AbortSignal): Promise<Run> {
     return this.track(signal => this.run(queryInput.parse(value), actor, signal, false), signal);
+  }
+  evidence(id: string): Run { return this.store.get('runs', id); }
+  metric(value: unknown, actor: Actor, signal?: AbortSignal): Promise<Run> {
+    const { environmentId, relationshipIds, ...spec } = metricInput.parse(value);
+    return this.track(async signal => {
+      const environment = await this.authorize(environmentId, actor);
+      const experiment = environment.experimentId && this.store.find('experiments', environment.experimentId);
+      const baseline = experiment && experiment.workId === environment.id && experiment.baselineMetricRunId
+        ? this.evidence(experiment.baselineMetricRunId).metric?.plan : undefined;
+      const relationships = relationshipIds.map(id => {
+        const record = this.store.find('knowledge', id);
+        if (!record || record.environmentId !== environmentId || record.fact.kind !== 'join') {
+          const dependency = baseline?.relationships.find(item => item.id === id);
+          if (dependency) return dependency;
+          throw new Error('请使用当前环境中已保存的多对一或一对一关系。');
+        }
+        return { id, version: record.version, sourceRunId: record.evidence.runId, from: record.fact.from, to: record.fact.to };
+      });
+      for (let i = 1; i < relationships.length; i++) {
+        const previous = relationships[i - 1]!.to;
+        const next = relationships[i]!.from;
+        if (previous.schema !== next.schema || previous.table !== next.table) {
+          throw new Error('关系须按从指标明细到最终归属表的顺序连续排列。');
+        }
+      }
+      return this.evaluateMetric(environment, { ...spec, relationships }, actor, signal);
+    }, signal);
+  }
+  private evaluateMetric(environment: Environment, plan: MetricPlan, actor: Actor, signal: AbortSignal): Promise<Run> {
+    return this.runOn(environment, {
+      environmentId: environment.id, sql: metricSql(plan), values: plan.filter ? [plan.filter.value] : [],
+    }, actor, signal, false, undefined, plan);
   }
   write(value: unknown, actor: Actor, signal?: AbortSignal): Promise<Run> {
     return this.track(signal => this.run(queryInput.parse(value), actor, signal, true), signal);
@@ -131,6 +201,19 @@ export class StellaneCore {
   }
   private async run(input: QueryInput, actor: Actor, signal: AbortSignal, write: boolean, purpose?: Run['purpose']): Promise<Run> {
     const environment = await this.authorize(input.environmentId, actor);
+    return this.runOn(environment, input, actor, signal, write, purpose);
+  }
+  private async runOn(environment: Environment, input: QueryInput, actor: Actor, signal: AbortSignal, write: boolean, purpose?: Run['purpose'],
+    metricPlan?: MetricPlan): Promise<Run> {
+    if (this.environment(environment.id).removedAt) throw new Error('该分支已清理。');
+    if (environment.experimentId) {
+      const experiment = this.store.get('experiments', environment.experimentId);
+      const preparingMetric = metricPlan && experiment.status === 'preparing' && experiment.baselineId === environment.id;
+      if (experiment.status !== 'active' && !preparingMetric && !(experiment.deliveryId && experiment.resultId === environment.id)) {
+        throw new Error('任务工作环境尚未就绪或正在清理。');
+      }
+      if (write && this.modifying.has(experiment.id)) throw new Error('任务正在固定结果或清理，请稍后写入。');
+    }
     if (write && (environment.access !== 'read-write' || !environment.stello?.managed)) {
       throw new Error('只能写入 Stellane 派生的可写分支；来源库、固定切面和普通 PG 环境保持只读。');
     }
@@ -149,6 +232,9 @@ export class StellaneCore {
     if (purpose) run.purpose = purpose;
     if (write) run.digest = digest;
     this.store.put('runs', run);
+    const active = this.activeRuns.get(environment.id) ?? new Set<string>();
+    active.add(run.id);
+    this.activeRuns.set(environment.id, active);
     let finished: Run;
     try {
       let preview;
@@ -168,17 +254,25 @@ export class StellaneCore {
       const status = write ? error instanceof WriteOutcomeError && error.unknown ? 'unknown' : 'failed'
         : signal.aborted ? 'interrupted' : 'failed';
       finished = { ...run, status, error: error instanceof Error ? error.message : '执行失败。' };
-    } finally { release(); }
+    } finally {
+      release();
+      active.delete(run.id);
+      if (!active.size) this.activeRuns.delete(environment.id);
+    }
     finished.finishedAt = new Date().toISOString(); finished.durationMs = Date.now() - started;
+    if (metricPlan) finished = withMetric(finished, metricPlan);
     this.store.put('runs', finished);
     return finished;
   }
   derive(kind: 'checkpoint' | 'fork', value: unknown, actor: Actor, signal?: AbortSignal): Promise<Environment> {
     return this.track(signal => this.deriveWork(kind, deriveInput.parse(value), actor, signal), signal);
   }
-  private async deriveWork(kind: 'checkpoint' | 'fork', input: { environmentId: string; name: string }, actor: Actor, signal: AbortSignal, intent?: string): Promise<Environment> {
+  private async deriveWork(kind: 'checkpoint' | 'fork', input: { environmentId: string; name: string }, actor: Actor, signal: AbortSignal,
+    intent?: string, experimentId?: string): Promise<Environment> {
     const parent = await this.authorize(input.environmentId, actor);
     if (!parent.stello) throw new Error('当前数据库没有分支能力，请先登记 Stello 来源。');
+    if (parent.experimentId && parent.experimentId !== experimentId) throw new Error('请在任务详情操作这个分支。');
+    if (actor.kind === 'agent' && this.store.find('scopes', actor.id)) throw new Error('请从工作台发起独立实验。');
     if (kind === 'fork' && parent.mode !== 'fixed') throw new Error('请先固定父环境状态，再从同一切面派生方案。');
     if (kind === 'checkpoint' && parent.mode === 'fixed') throw new Error('这个环境已经是固定切面，可以直接派生。');
     const id = invocationId(actor, kind);
@@ -188,14 +282,20 @@ export class StellaneCore {
       if (existing.parentEnvironmentId !== parent.id || existing.environment.name !== input.name || existing.kind !== kind
         || (existing.inputDigest && existing.inputDigest !== inputDigest)) throw new Error('原调用标识已关联其他派生请求。');
       if (existing.status === 'succeeded') return this.environment(existing.environment.id);
-      throw new Error(`原派生操作 ${id} 尚未确认，请核对原分支；未另建资源。`);
+      if (experimentId && existing.status === 'unknown' && existing.request) {
+        const source = this.store.get('providers', existing.providerId);
+        return this.finishBranch(existing, await this.branches.resumeCreation(source, existing, signal));
+      }
+      if (!(experimentId && existing.status === 'failed' && !existing.request)) {
+        throw new Error(`原派生操作 ${id} 尚未确认，请核对原分支。`);
+      }
     }
     this.capacity(parent.projectPath);
     const release = kind === 'checkpoint' ? this.lock(parent.id) : () => {};
     const source = this.store.get('providers', parent.stello.providerId);
-    const environment: Environment = { id: randomUUID(), name: input.name, projectPath: parent.projectPath,
+    const environment: Environment = existing?.environment ?? { id: randomUUID(), name: input.name, projectPath: parent.projectPath,
       mode: kind === 'checkpoint' ? 'fixed' : 'branch', access: kind === 'checkpoint' ? 'read-only' : 'read-write',
-      createdAt: new Date().toISOString(), parentEnvironmentId: parent.id };
+      createdAt: new Date().toISOString(), parentEnvironmentId: parent.id, experimentId };
     const operation: BranchOperation = { id, kind, providerId: source.id, parentEnvironmentId: parent.id,
       resource: `${parent.stello.resource.split('/')[0]}/sl-${id.replaceAll('-', '').slice(0, 20)}`,
       actor: { ...actor }, environment, inputDigest, status: 'pending', createdAt: environment.createdAt };
@@ -214,14 +314,17 @@ export class StellaneCore {
   }
   private finishBranch(operation: BranchOperation, binding: BranchBinding): Environment {
     const environment = { ...operation.environment, stello: binding };
-    this.store.put('environments', environment);
-    this.store.put('operations', { ...operation, environment, status: 'succeeded', error: undefined });
+    this.store.transaction(() => {
+      this.store.put('environments', environment);
+      this.store.put('operations', { ...operation, environment, status: 'succeeded', error: undefined });
+    });
     return environment;
   }
   reconcileOperation(id: string, actor: Actor, signal?: AbortSignal): Promise<BranchOperation> {
     return this.track(async signal => {
       const operation = this.store.get('operations', id);
       await this.authorize(operation.parentEnvironmentId, actor);
+      if (operation.environment.experimentId) throw new Error('请在任务详情核对这次派生。');
       if (operation.status === 'succeeded' || operation.status === 'failed') return operation;
       const binding = await this.branches.reconcile(this.store.get('providers', operation.providerId), operation, signal);
       if (binding) this.finishBranch(operation, binding);
@@ -273,8 +376,178 @@ export class StellaneCore {
   }
   async results(environmentId: string, actor: Actor): Promise<DeliveredResult[]> {
     await this.authorize(environmentId, actor);
-    return this.store.list('deliveries').filter(delivery => delivery.recipientEnvironmentId === environmentId).slice(0, 3)
+    return this.store.list('deliveries').filter(delivery => delivery.recipientEnvironmentId === environmentId
+      && (actor.kind === 'user' || !this.environment(delivery.snapshotEnvironmentId).experimentId)).slice(0, 3)
       .map(delivery => ({ delivery, environment: this.environment(delivery.snapshotEnvironmentId), run: this.store.get('runs', delivery.runId) }));
+  }
+  experimentDetail(id: string): ExperimentDetail {
+    const experiment = this.store.get('experiments', id);
+    const { sourceId, baselineId, workId, resultId, deliveryId } = experiment;
+    const delivery = deliveryId ? this.store.get('deliveries', deliveryId) : undefined;
+    const result = resultId ? this.environment(resultId) : undefined;
+    return { experiment, source: this.environment(sourceId), baseline: baselineId ? this.environment(baselineId) : undefined,
+      work: workId ? this.environment(workId) : undefined, result,
+      runs: workId ? this.store.experimentRuns(workId) : [], unresolved: workId ? this.store.experimentRuns(workId, true) : [],
+      delivered: delivery && result ? { delivery, environment: result, run: this.store.get('runs', delivery.runId) } : undefined,
+      baselineMetric: experiment.baselineMetricRunId ? this.evidence(experiment.baselineMetricRunId) : undefined,
+      processing: this.modifying.has(id) };
+  }
+  private async authorizeExperiment(id: string, actor: Actor): Promise<void> {
+    if (actor.kind === 'user') return;
+    const project = await this.agentProject(actor);
+    const experiment = this.store.find('experiments', id);
+    if (experiment?.projectPath !== project || experiment.sessionId !== actor.id) {
+      throw new Error('当前对话无权访问此实验。');
+    }
+  }
+  async conversationExperiments(actor: Actor, id?: string): Promise<Experiment[] | ExperimentDetail> {
+    if (id) {
+      await this.authorizeExperiment(id, actor);
+      return this.experimentDetail(id);
+    }
+    return this.store.conversationExperiments(await this.agentProject(actor), actor.id);
+  }
+  startConversationExperiment(value: unknown, actor: Actor, signal?: AbortSignal): Promise<ExperimentDetail> {
+    const input = experimentSourceInput.parse(value);
+    return this.track(async signal => {
+      const source = await this.authorize(input.environmentId, actor);
+      const sessionId = actor.id;
+      if (source.mode === 'branch' || this.store.find('scopes', sessionId)) {
+        throw new Error('请在普通项目对话中选择 Stello 来源或固定基线创建实验。');
+      }
+      const id = invocationId(actor, 'start-experiment');
+      const saved = this.store.find('experiments', id)
+        ?? this.store.openConversationExperiment(source.projectPath, sessionId, source.id, input.name);
+      return this.prepareExperiment({ ...input, id: saved?.id ?? id }, signal, sessionId);
+    }, signal);
+  }
+  startExperiment(value: unknown, signal?: AbortSignal): Promise<ExperimentDetail> {
+    const input = experimentInput.parse(value);
+    return this.track(signal => this.prepareExperiment(input, signal), signal);
+  }
+  private async prepareExperiment(input: ExperimentInput, signal: AbortSignal, sessionId?: string): Promise<ExperimentDetail> {
+    const source = this.environment(input.environmentId);
+    if (!source.stello || source.experimentId || source.removedAt) throw new Error('请选择可用于实验的 Stello 来源或固定基线。');
+    const saved = this.store.find('experiments', input.id);
+    const metricRunId = input.metricRunId ?? saved?.metricRunId;
+    const metricRun = metricRunId ? this.store.find('runs', metricRunId) : undefined;
+    if (metricRunId && (!metricRun?.metric?.counts || metricRun.environmentId !== source.id || metricRun.metric.status === 'complete')) {
+      throw new Error('请选择同一数据环境中的异常指标记录。');
+    }
+    if (saved && (saved.sourceId !== source.id || saved.name !== input.name || saved.metricRunId !== metricRunId
+      || (sessionId && saved.sessionId !== sessionId))) {
+      throw new Error('原任务已关联其他实验。');
+    }
+    if (!saved) this.capacity(source.projectPath, (source.mode === 'fixed' ? 1 : 2) + (sessionId ? 1 : 0));
+    const experiment: Experiment = saved ?? { id: input.id, sourceId: source.id, name: input.name,
+      projectPath: source.projectPath, createdAt: new Date().toISOString(), status: 'preparing', sessionId, metricRunId };
+    if (experiment.status !== 'preparing') return this.experimentDetail(experiment.id);
+    return this.updateExperiment(experiment, async () => {
+      const actor: Actor = { ...owner, callId: experiment.id };
+      const baseline = experiment.baselineId ? this.environment(experiment.baselineId) : source.mode === 'fixed' ? source
+        : await this.deriveWork('checkpoint', { environmentId: source.id, name: '实验基线' }, actor, signal, undefined, experiment.id);
+      experiment.baselineId = baseline.id;
+      this.store.put('experiments', experiment);
+      if (metricRun?.metric && !experiment.baselineMetricRunId) {
+        const baselineMetric = await this.evaluateMetric(baseline, metricRun.metric.plan, actor, signal);
+        if (baselineMetric.status !== 'succeeded' || !baselineMetric.metric?.counts) throw new Error('未能核对固定基线上的指标，请核对后重试。');
+        experiment.baselineMetricRunId = baselineMetric.id;
+        this.store.put('experiments', experiment);
+      }
+      const work = await this.deriveWork('fork', { environmentId: baseline.id, name: experiment.name }, actor, signal, undefined, experiment.id);
+      experiment.workId = work.id;
+      experiment.status = 'active';
+    });
+  }
+  captureExperiment(value: unknown, signal?: AbortSignal, actor: Actor = owner): Promise<ExperimentDetail> {
+    const { id, summary, sql, values } = experimentResultInput.parse(value);
+    return this.track(async signal => {
+      await this.authorizeExperiment(id, actor);
+      const experiment = this.store.get('experiments', id);
+      if (experiment.deliveryId) return this.experimentDetail(id);
+      if (experiment.status !== 'active' || !experiment.workId) throw new Error('任务的工作分支尚不可用。');
+      const workId = experiment.workId;
+      const plan = experiment.baselineMetricRunId ? this.evidence(experiment.baselineMetricRunId).metric?.plan : undefined;
+      if (!plan && !sql) throw new Error('请提供只读证据 SQL。');
+      if (this.modifying.has(workId)) throw new Error('请等待当前写入结束再固定结果。');
+      if (this.store.experimentRuns(workId, true).length) throw new Error('请先核对待确认的写入。');
+      return this.updateExperiment(experiment, async () => {
+        const lifecycleActor: Actor = { ...owner, callId: `${id}:result` };
+        experiment.evidence = { summary, sql: plan ? metricSql(plan) : sql!, values: plan ? (plan.filter ? [plan.filter.value] : []) : values };
+        this.store.put('experiments', experiment);
+        const result = experiment.resultId ? this.environment(experiment.resultId)
+          : await this.deriveWork('checkpoint', { environmentId: workId, name: '固定结果' }, lifecycleActor, signal, undefined, id);
+        experiment.resultId = result.id;
+        this.store.put('experiments', experiment);
+        const run = plan ? await this.evaluateMetric(result, plan, actor, signal)
+          : await this.runOn(result, queryInput.parse({ environmentId: result.id, sql, values }), actor, signal, false);
+        if (run.status !== 'succeeded') throw new Error(`切面已保存。请在原切面补查证据。${run.error ?? ''}`);
+        if (plan && !run.metric?.counts) throw new Error('切面已保存，尚未取得指标覆盖证据。');
+        const delivery: Delivery = { id, sourceEnvironmentId: workId, recipientEnvironmentId: experiment.sourceId,
+          snapshotEnvironmentId: result.id, runId: run.id, summary, actor, projectPath: experiment.projectPath, createdAt: new Date().toISOString() };
+        experiment.deliveryId = delivery.id;
+        this.store.transaction(() => {
+          this.store.put('deliveries', delivery);
+          this.store.put('experiments', experiment);
+        });
+      });
+    }, signal);
+  }
+  finishExperiment(id: string, signal?: AbortSignal, actor: Actor = owner): Promise<ExperimentDetail> {
+    return this.track(async signal => {
+      await this.authorizeExperiment(id, actor);
+      const experiment = this.store.get('experiments', id);
+      if (experiment.status === 'closed') return this.experimentDetail(id);
+      if (actor.kind === 'agent' && !experiment.deliveryId) throw new Error('请先固定并交付证据，再清理实验。');
+      const lifecycleActor: Actor = { ...owner, callId: id };
+      const baselineOp = this.store.find('operations', invocationId(lifecycleActor, 'checkpoint'));
+      const workOp = this.store.find('operations', invocationId(lifecycleActor, 'fork'));
+      if ([baselineOp, workOp].some(op => op?.status === 'unknown' || op?.status === 'pending')) {
+        throw new Error('请先核对未完成的分支派生。');
+      }
+      const resultOp = this.store.find('operations', invocationId({ ...lifecycleActor, callId: `${id}:result` }, 'checkpoint'));
+      if (resultOp?.status === 'unknown' || resultOp?.status === 'pending') throw new Error('请先在交付入口核对未完成的固定切面。');
+      const resourceId = (saved: string | undefined, operation: BranchOperation | undefined) =>
+        saved ?? (operation?.status === 'succeeded' ? operation.environment.id : undefined);
+      const workId = resourceId(experiment.workId, workOp);
+      const baselineId = resourceId(experiment.baselineId, baselineOp);
+      const resultId = resourceId(experiment.resultId, resultOp);
+      const owned = [experiment.deliveryId ? undefined : resultId, workId, baselineId].flatMap(environmentId => {
+        if (!environmentId) return [];
+        const environment = this.environment(environmentId);
+        return environment.experimentId === id && !environment.removedAt ? [environment] : [];
+      });
+      if (owned.some(environment => this.activeRuns.has(environment.id))) throw new Error('请等待当前查询或写入结束。');
+      if (workId && this.store.experimentRuns(workId, true).length) throw new Error('请先核对待确认的写入。');
+      return this.updateExperiment(experiment, async () => {
+        Object.assign(experiment, { workId, baselineId, resultId });
+        experiment.status = 'closing';
+        this.store.put('experiments', experiment);
+        for (const environment of owned) {
+          if (!environment.stello?.managed) throw new Error('没有可核对的任务分支身份。');
+          const environmentId = environment.id;
+          const source = this.store.get('providers', environment.stello.providerId);
+          await this.branches.remove(source, environment.stello, environmentId, this.store.find('removals', environmentId),
+            removal => this.store.put('removals', removal), signal);
+          this.store.put('environments', { ...environment, removedAt: new Date().toISOString() });
+        }
+        experiment.status = 'closed';
+      });
+    }, signal);
+  }
+  private async updateExperiment(experiment: Experiment, work: () => Promise<void>): Promise<ExperimentDetail> {
+    const release = this.lock(experiment.id);
+    try {
+      delete experiment.error;
+      this.store.put('experiments', experiment);
+      await work();
+    } catch (error) {
+      experiment.error = error instanceof Error ? error.message : '任务操作中断，请核对原操作。';
+    } finally {
+      this.store.put('experiments', experiment);
+      release();
+    }
+    return this.experimentDetail(experiment.id);
   }
   async close(): Promise<void> {
     this.shutdown.abort(); await Promise.allSettled([...this.active]); this.store.close();

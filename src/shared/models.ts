@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { MetricEvidence } from './metric-models.ts';
 
 export const connectionInput = z.strictObject({
   name: z.string().trim().min(1).max(80),
@@ -32,6 +33,7 @@ export interface Environment {
   id: string; connectionId?: string; name: string; projectPath: string;
   mode: 'live' | 'fixed' | 'branch'; access: 'read-only' | 'read-write'; createdAt: string;
   parentEnvironmentId?: string; stello?: BranchBinding;
+  experimentId?: string; removedAt?: string;
 }
 export const deriveInput = z.strictObject({
   environmentId: z.string().uuid(), name: z.string().trim().min(1).max(80),
@@ -64,6 +66,7 @@ export interface Run {
   startedAt: string; finishedAt?: string; durationMs?: number;
   target?: DatabaseTarget; preview?: QueryPreview; error?: string;
   branch?: BranchBinding;
+  metric?: MetricEvidence;
 }
 export interface BranchOperation {
   id: string; kind: 'checkpoint' | 'fork'; providerId: string; parentEnvironmentId: string;
@@ -75,7 +78,33 @@ export interface Delivery {
   runId: string; summary: string; actor: Actor; projectPath: string; createdAt: string;
 }
 export interface DeliveredResult { delivery: Delivery; environment: Environment; run: Run }
+export const experimentSourceInput = z.strictObject({
+  environmentId: z.string().uuid(), name: z.string().trim().min(1).max(80), metricRunId: z.string().uuid().optional(),
+});
+export const experimentInput = experimentSourceInput.extend({ id: z.string().uuid() });
+export type ExperimentInput = z.infer<typeof experimentInput>;
+export const experimentResultInput = z.strictObject({
+  id: z.string().uuid(), summary: z.string().trim().min(1).max(4000), sql: queryInput.shape.sql.optional(), values: queryInput.shape.values,
+});
+export interface Experiment {
+  id: string; projectPath: string; name: string; sourceId: string; createdAt: string;
+  status: 'preparing' | 'active' | 'closing' | 'closed';
+  baselineId?: string; workId?: string; resultId?: string; deliveryId?: string; sessionId?: string;
+  metricRunId?: string; baselineMetricRunId?: string;
+  evidence?: { summary: string; sql: string; values?: QueryInput['values'] }; error?: string;
+}
+export interface ExperimentDetail {
+  experiment: Experiment; source: Environment; baseline?: Environment; work?: Environment; result?: Environment;
+  delivered?: DeliveredResult; unresolved: Run[]; runs: Run[];
+  baselineMetric?: Run;
+  processing?: boolean;
+}
+export interface ConversationScope { id: string; environmentId: string }
+export interface BranchRemoval {
+  id: string; name: string; identity: BranchIdentity; expected_revision: number; operation_id: string;
+}
 export interface Snapshot {
   connections: Connection[]; environments: Environment[]; runs: Run[];
   providers: StelloSource[]; operations: BranchOperation[]; deliveries: Delivery[];
+  experiments: Experiment[];
 }

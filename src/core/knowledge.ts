@@ -77,7 +77,13 @@ export class KnowledgeMemory {
     });
     const seen = new Set<string>();
     const learned = this.store.knowledge(context.environmentId).map((record): KnowledgeItem => {
-      const { id, version, fact, evidence, invalidation } = record;
+      const { id, version, fact, evidence } = record;
+      const invalidation = record.invalidation && { ...record.invalidation };
+      if (invalidation && invalidation.unmatchedRows === undefined && fact.kind === 'join') {
+        const run = this.store.find('runs', invalidation.evidence.runId);
+        const unmatched = count.safeParse(run?.preview?.rows[0]?.unmatched);
+        if (unmatched.success) invalidation.unmatchedRows = unmatched.data;
+      }
       const item = { id, version, fact, evidence, ...(invalidation ? { invalidation } : {}) };
       const superseded = seen.has(record.key);
       seen.add(record.key);
@@ -134,7 +140,7 @@ export class KnowledgeMemory {
       const previous = versions.find(record => record.key === key);
       const reject = (reason: string): LearnResult => {
         if (previous && previous.dependencyFingerprint === dependencyFingerprint) {
-          this.store.put('knowledge', { ...previous, invalidation: { reason, evidence: observed } });
+          this.store.put('knowledge', { ...previous, invalidation: { reason, evidence: observed, unmatchedRows: unmatched } });
         }
         return { accepted: false, reason, evidence: observed };
       };

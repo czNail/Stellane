@@ -94,8 +94,9 @@ export function Connections({ api, data, refresh, onOpen, onCreate }: {
   function saved(environment?: Environment) {
     setAdding(false);
     setNotice({ text: environment ? 'Stello 来源已连接，环境已创建。' : '连接已保存。' });
-    if (environment) onOpen?.(environment);
-    void refresh().catch(error => setNotice({ text: message(error), error: true }));
+    void refresh().then(snapshot => {
+      if (environment && snapshot) onOpen?.(environment);
+    }).catch(error => setNotice({ text: message(error), error: true }));
   }
 
   return <section aria-label="数据连接" className="st-stack">
