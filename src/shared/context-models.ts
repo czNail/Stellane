@@ -47,9 +47,10 @@ export interface SemanticDefinition extends Omit<DefinitionContent, 'expectedVer
   id: string; projectPath: string; dataSourceId: string; sourceFingerprint: string; version: number;
   source: { name: string; uri?: string }; author: Actor; createdAt: string; contextId: string; runId: string;
   dependencies: { schema: string; table: string; fingerprint: string }[];
+  archivedAt?: string;
 }
 export interface CatalogImport { id: string; projectPath: string; dataSourceId: string; environmentId: string; digest: string; definitionIds: string[]; createdAt: string }
-export interface DefinitionStatus { definition: SemanticDefinition; status: 'applicable' | 'stale' | 'superseded'; reason: string }
+export interface DefinitionStatus { definition: SemanticDefinition; status: 'applicable' | 'stale' | 'superseded' | 'archived'; reason: string }
 export interface ContextResult {
   context: ContextRecord; relations: RelationMetadata[]; definitions: SemanticDefinition[];
   knowledge: KnowledgeItem[];

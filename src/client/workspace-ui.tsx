@@ -1,3 +1,4 @@
+import { t, useLocale } from './i18n.tsx';
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import type { Operation, Requests, Responses } from '../shared/remote.ts';
 import type { Environment } from '../shared/models.ts';
@@ -15,7 +16,7 @@ export interface ProjectAccess {
 }
 
 export function environmentLabel(environment: Environment): string {
-  return describeEnvironment(environment).stateLabel;
+  return t(describeEnvironment(environment).stateLabel);
 }
 
 export function environmentTree(environments: Environment[]): { environment: Environment; depth: number }[] {
@@ -41,20 +42,33 @@ export function ActionDialog({ title, children, busy, onClose }: {
   busy?: boolean;
   onClose: () => void;
 }) {
+  useLocale();
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
     const dialog = ref.current!;
+    const previousFocus = document.activeElement;
     dialog.showModal();
-    return () => dialog.close();
+    return () => { dialog.close(); if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus(); };
   }, []);
-  return <dialog ref={ref} className="st-dialog" aria-labelledby={titleId} onCancel={event => {
+  return <dialog ref={ref} className="st-dialog" aria-labelledby={titleId} onKeyDown={event => {
+    if (event.key !== 'Tab') return;
+    const dialog = ref.current!;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      'button, input, textarea, select, a[href], summary, [tabindex]',
+    )).filter(element => element.tabIndex >= 0 && !element.matches(':disabled, [hidden]') && element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first) { event.preventDefault(); dialog.focus(); return; }
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }} onCancel={event => {
     event.preventDefault();
     if (!busy) onClose();
   }}>
     <header className="st-dialog-header">
       <h2 id={titleId}>{title}</h2>
-      <button className="st-button st-quiet" type="button" aria-label="关闭" disabled={busy} onClick={onClose}>×</button>
+      <button className="st-button st-quiet" type="button" aria-label={t("关闭")} disabled={busy} onClick={onClose}>×</button>
     </header>
     {children}
   </dialog>;

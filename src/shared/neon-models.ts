@@ -1,12 +1,18 @@
 import { z } from 'zod';
 
 const neonId = z.string().regex(/^[a-z0-9-]{1,60}$/);
+export const localNeonEndpoint = z.string().max(200).refine(value => {
+  if (!/^http:\/\/(?:127\.0\.0\.1|\[::1\]):[1-9][0-9]{0,4}\/?$/.test(value)) return false;
+  try { const url = new URL(value); return Number(url.port) > 0 && Number(url.port) <= 65535; }
+  catch { return false; }
+}, 'Local Neon requires an explicit loopback HTTP endpoint and port.').transform(value => new URL(value).origin);
 export const neonInput = z.strictObject({
   name: z.string().trim().min(1).max(80),
   projectPath: z.string().trim().min(1).max(1024),
   projectId: neonId, branchId: neonId,
   database: z.string().trim().min(1).max(63), user: z.string().trim().min(1).max(63),
   apiKeyRef: z.string().regex(/^(env:[A-Z_][A-Z0-9_]*|file:\/[^\r\n]+)$/),
+  localEndpoint: localNeonEndpoint.optional(),
 });
 export type NeonInput = z.infer<typeof neonInput>;
 export interface NeonSource extends NeonInput { id: string; createdAt: string }
@@ -17,6 +23,7 @@ export interface NeonBinding {
   providerId: string; projectId: string; branchId: string; endpointId: string;
   createdAt: string; parentId?: string; parentLsn?: string; lastResetAt?: string;
   managed: boolean; checkpoint: boolean; operationId?: string;
+  local?: true;
 }
 export interface NeonRemoval {
   id: string; kind: 'branch' | 'compute'; projectId: string; branchId: string; endpointId: string;

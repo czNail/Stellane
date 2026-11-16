@@ -1,0 +1,47 @@
+name: Check and package
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  base:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24.9.0', '24.x']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: corepack enable && corepack prepare pnpm@11.1.2 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+  postgres-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+      - run: corepack enable && corepack prepare pnpm@11.1.2 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dev:db
+      - run: pnpm test:integration
+      - name: Stop the owned PostgreSQL fixture
+        if: always()
+        run: pnpm dev:db stop
+      - run: pnpm test:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stellane-preview-package
+          path: |
+            .stellane-dev/release/*.tgz
+            .stellane-dev/release/package-check.json
+          if-no-files-found: error

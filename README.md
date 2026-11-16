@@ -6,7 +6,7 @@ Stellane is a DeepSeek Harness plugin for asking questions and testing ideas in 
 
 Multiple trial paths are central to Stellane: start from a common baseline, let each idea develop independently, then make a decision with evidence. The side panel shows sources, memory, SQL, experiment progress and retained results.
 
-[中文说明](README.zh-CN.md) · [Try the demos](examples/README.md) · [Branch experiment walkthrough](docs/experiments.md) · [Product decisions](PRODUCT.md) · [Development and testing](DEVELOPMENT.md)
+[中文说明](README.zh-CN.md) · [Try the demos](examples/README.md) · [Branch experiment walkthrough](docs/experiments.md) · [Product decisions](PRODUCT.md) · [Development and testing](DEVELOPMENT.md) · [Install, upgrade and remove](docs/install-and-maintain.md) · [Data and privacy](docs/data-and-privacy.md)
 
 ## When it helps
 
@@ -51,19 +51,32 @@ The current workflow supports separately named experiments from a shared baselin
 | Connection | Queries, definitions, view lineage and relationship memory | Isolated write experiments |
 | --- | --- | --- |
 | PostgreSQL | Yes | Requires a branching provider |
-| Neon connection URL | Yes | Add Neon API access to enable |
-| Neon with API access | Yes | Experimental; cloud validation pending |
+| Neon connection URL | Yes | The URL alone has no branching management |
+| Open-source Neon in Docker | Yes | [Experimental local controller](docs/local-neon.md); full runtime acceptance pending |
+| Neon cloud API | Yes | Experimental adapter; cloud validation is outside this preview |
 | Stello | Yes | Yes |
 
 **A Postgres connection is enough to start.** Analysis and memory do not require Docker, Stello or a Neon API key. Use branching when a question needs an isolated change to data or schema; a read-only question can stay on the source connection.
 
-Stellane uses the provider's database branching rather than implementing its own copy engine. Stello provides fixed data states. Neon provides branches that Stellane treats as read-only baselines and results; an external administrator can still change them. Neon results can depend on retained parent branches. The panel reports that retention, and those resources may incur Neon charges. Branch startup time and resource cost depend on the provider and workload.
+Stellane uses the provider's database branching rather than implementing its own copy engine. Stello provides fixed data states. Neon provides branches that Stellane treats as read-only baselines and results; an external administrator can still change them. Neon results can depend on retained parent branches. The panel reports that retention. Local Docker timelines occupy disk; a cloud account can incur charges. The self-hosted Docker route is under validation; its complete runtime test has not passed yet. Branch startup time and resource cost depend on the provider and workload.
+
+## Install the preview
+
+Version **0.3.0-preview.1** targets Harness Web with Node.js **24.9+** and DSH **0.2.2-rc.1 through rc.3**. Start with a DSH profile whose model connection already works. The preview archive contains built code; users do not need a compiler or a checkout.
+
+Install the `.tgz` supplied with this preview, using its actual absolute path:
+
+```sh
+dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
+```
+
+Restart the same Web Host, then open Stellane from the sidebar. If you launch it in a terminal, stop that Host and run `dsh web`; for a remote Host use `dsh web --no-open` and your existing access method. This repository does not claim that the preview is already published to npm.
+
+The interface supports English and Chinese, with a language selector in the panel. See [installation and maintenance](docs/install-and-maintain.md) for state locations, upgrade backups and removal. Linux is the current real-runtime validation environment; other operating systems still need their own end-to-end validation.
 
 ## Install from source
 
-This is a development version. Use a local checkout; these instructions do not assume a published npm release.
-
-Prerequisites: Node.js **24.9+**, pnpm **11.1.2** through Corepack, and DeepSeek Harness **0.2.2-rc.1** with a working model connection. The panel currently targets Harness Web.
+For development, use Node.js 24.9+ and pnpm 11.1.2 through Corepack:
 
 ```sh
 git clone https://github.com/czNail/Stellane.git
@@ -73,13 +86,7 @@ corepack pnpm check
 dsh plugin --profile web add "$PWD"
 ```
 
-Restart the Harness Web Host after installing the plugin. If you start it from a terminal, stop the existing process and run:
-
-```sh
-dsh web
-```
-
-Harness opens the browser and prints its address. For a remote Host, use `dsh web --no-open` and your existing way of accessing that Host. Install the plugin in the same profile you run.
+Restart the same Host after changing the built plugin. Development and release checks are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Try it without your own data
 
@@ -88,19 +95,19 @@ The repository includes small synthetic datasets, example questions, deliberate 
 With Docker running:
 
 ```sh
-corepack pnpm demo start
-corepack pnpm demo status
+dsh plugin --profile web exec stellane-demo start
+dsh plugin --profile web exec stellane-demo status
 ```
 
 Follow the printed project and private connection-file instructions, then use the [step-by-step demos](examples/README.md). The local Postgres demo covers analysis and memory. The branch walkthrough additionally needs a configured Neon or Stello test source; starting the local demo does not create a cloud project.
 
-Use `corepack pnpm demo stop` when finished. Reset, data-change and provider setup instructions are in the demo guide. The helper manages its own labeled demo resources.
+Use `dsh plugin --profile web exec stellane-demo stop` when finished. From a source checkout, the equivalent commands are `pnpm demo start`, `status` and `stop`. Reset, data-change and provider setup instructions are in the demo guide. The helper manages its own labeled demo resources.
 
 ## Connect once, then chat
 
-1. Open **Stellane → 数据源 (Data sources) → 添加数据源 (Add data source)**.
+1. Open **Stellane → Data sources → Add data source**.
 2. Select PostgreSQL or Neon, paste the connection URL and confirm the project directory. The current Harness project is filled in when available; the name defaults to the database name. The database itself may be remote.
-3. Click **连接并开始使用 (Connect and start)**. Stellane tests the connection, stores credentials in a private file on the Host, and creates a read-only environment.
+3. Click **Connect and start**. Stellane tests the connection, stores credentials in a private file on the Host, and creates a read-only environment.
 4. Open a normal chat in that project and ask a question. The bundled `stellane-data` Skill guides the Agent to the connected data; no separate Stellane chat is required.
 
 Example prompts — replace the object names with your own:
@@ -111,9 +118,9 @@ Example prompts — replace the object names with your own:
 >
 > In a new chat: calculate another metric using the relationship we found. Verify that it still holds.
 
-Multiple relevant sources? Name the one to use in the conversation. Business definitions are optional; add them under **数据目录 (Data catalog)** when a term needs an agreed meaning.
+Multiple relevant sources? Name the one to use in the conversation. Business definitions are optional; add them under **Data catalog** when a term needs an agreed meaning.
 
-For Neon experiments, select **启用独立试验 (Enable isolated experiments)** when adding the source and provide its project ID, branch ID and API key. For Stello, use its exported client configuration and source branch. You can then request a single trial or multiple named trials from a shared baseline. See [experiments](docs/experiments.md) for the exact workflow and provider differences.
+For local Neon experiments, follow [the Docker Neon setup](docs/local-neon.md); the installed package includes its launcher. Cloud API access is a separate experimental route. For Stello, use its exported client configuration and source branch. You can then request a single trial or multiple named trials from a shared baseline. See [experiments](docs/experiments.md) for the exact workflow and provider differences.
 
 ## Where to look
 
@@ -123,6 +130,7 @@ For Neon experiments, select **启用独立试验 (Enable isolated experiments)*
 | 数据目录 · Data catalog | Tables, definitions, view lineage and saved relationship observations, including failed rechecks. |
 | 探索 · SQL exploration | Run SQL manually or open a conversation bound to a specific environment. |
 | 数据源 · Data sources | Add connections and see which capabilities each provides. |
+| 管理与清理 · Management | Disable access, update credentials, archive memory, remove retained branches or delete local data. |
 
 You can stay in chat for daily work. Open the panel when you want to inspect or manage what happened.
 
@@ -134,4 +142,6 @@ You can stay in chat for daily work. Open the panel when you want to inspect or 
 - Source connections are read-only through Stellane. Writes are restricted to plugin-created experiment branches. Use a database role with the access you want to grant.
 - State and evidence live on one Harness Host. Distributed hosting, general multi-Agent experiment scheduling and automatic production adoption are outside the current scope.
 
-PostgreSQL and Stello have real-database integration tests. Neon branching is experimental: its API contract tests pass, but cloud end-to-end validation has not yet been run. An opt-in `test:neon:live` suite is available for a dedicated Neon test project. See [the test guide](DEVELOPMENT.md#检查与验收) for requirements and coverage. Demo outputs illustrate behavior on synthetic data, not a promise of production accuracy or speed.
+PostgreSQL and Stello have real-database integration tests. Neon cloud execution remains outside this preview; API contract checks are not a cloud acceptance result. The self-hosted Docker setup uses open-source Neon services and a Stellane development controller, independently of a paid cloud account. See [the test guide](DEVELOPMENT.md#检查与验收) for requirements and coverage. Demo outputs illustrate behavior on synthetic data, not a promise of production accuracy or speed.
+
+See [release status](docs/release-status.md) for verified behavior and remaining release gates.

@@ -4,7 +4,7 @@ These demos answer three practical questions: can the Agent understand an unfami
 
 Everything here is synthetic. The datasets are ordinary PostgreSQL tables, comments and views. No example table name is built into Stellane's product logic.
 
-[中文演示指南](README.zh-CN.md) · [Installation](../README.md#install-from-source) · [Multiple experiment paths](../docs/experiments.md)
+[中文演示指南](README.zh-CN.md) · [Installation](../README.md#install-the-preview) · [Multiple experiment paths](../docs/experiments.md)
 
 ## Pick a starting point
 
@@ -19,33 +19,33 @@ Start with demos 1 and 2. Demos 3 and 4 show why Stellane has multiple experimen
 
 ## Prepare a local playground
 
-Install and build the plugin following the main README. Run these commands from the checkout on the same machine as the Harness Host. Docker must be available.
+Install the preview following the main README. Run these commands on the same machine as the Harness Host, with Docker available. No source checkout is needed for these analysis and memory demos. From a source checkout you may replace `dsh plugin --profile web exec stellane-demo` with `corepack pnpm demo` throughout.
 
 ```sh
-corepack pnpm demo start
-corepack pnpm demo url
+dsh plugin --profile web exec stellane-demo start
+dsh plugin --profile web exec stellane-demo url
 ```
 
 The helper creates its own PostgreSQL 17 container, a read-only database user, both datasets and a project directory. It binds a random port on `127.0.0.1`. It does not use your normal development database.
 
 1. Copy the URL printed by `demo url`.
-2. In DSH, open **Stellane → 数据源 → 添加数据源**, select PostgreSQL and paste the URL.
-3. Set the project to the absolute path printed by `demo start`, ending in **`.stellane-dev/demo/project`**. You can name the connection `Stellane demo`.
-4. Click **连接并开始使用**.
-5. Open that project in the Harness workspace sidebar, then open a normal chat. You can keep using chat throughout the exercises.
+2. In DSH, open **Stellane → Data sources → Add data source**, select PostgreSQL and paste the URL.
+3. Set the project to the absolute path printed by `demo start`, normally **`~/.local/share/stellane-demo/project`** for an installed package. You can name the connection `Stellane demo`.
+4. Click **Connect and start**.
+5. Click **Ask in project chat** on the connection card to open a normal chat in the correct project. For later chats, hover over that project in the Harness workspace sidebar and click its new-chat button. You can keep using chat throughout the exercises.
 
-`demo start` preserves existing data on subsequent runs. Connection files and local passwords are generated under `.stellane-dev/demo/`, which is excluded from Git. To inspect or stop the playground:
+`demo start` preserves existing data on subsequent runs. Connection files and local passwords are generated under `~/.local/share/stellane-demo/` for the package, or the Git-ignored `.stellane-dev/demo/` in a source checkout. An absolute `STELLANE_DEMO_HOME` overrides either location. To inspect or stop the playground:
 
 ```sh
-corepack pnpm demo status
-corepack pnpm demo verify
-corepack pnpm demo stop
+dsh plugin --profile web exec stellane-demo status
+dsh plugin --profile web exec stellane-demo verify
+dsh plugin --profile web exec stellane-demo stop
 ```
 
 `stop` retains the database volume. Run `start` to resume. `reset` restores only the two demo schemas and changes their object identities; old Stellane observations must then be validated again.
 
 ```sh
-corepack pnpm demo reset
+dsh plugin --profile web exec stellane-demo reset
 ```
 
 ## 1. Discover relationships, then use them in a new chat
@@ -64,7 +64,7 @@ Expected answer:
 | South | 1 |
 | **Total** | **5** |
 
-Open **数据目录 → 关系与血缘**. Look for the two relationships connecting events to devices and devices to areas, with actual validation evidence. The existing `active_event_totals` view also has catalog-derived lineage. Those are different sources of knowledge: a catalog dependency and a data-checked observation.
+Open **Data catalog → Relationships and lineage**. Look for the two relationships connecting events to devices and devices to areas, with actual validation evidence. The existing `active_event_totals` view also has catalog-derived lineage. Those are different sources of knowledge: a catalog dependency and a data-checked observation.
 
 Start a **new normal chat in the same project**:
 
@@ -79,7 +79,7 @@ Expected sums are **North 110, South 40, total 150**. The Agent should retrieve 
 Keep the connection and saved memories. In a terminal, change one synthetic event's device reference:
 
 ```sh
-corepack pnpm demo drift telemetry
+dsh plugin --profile web exec stellane-demo drift telemetry
 ```
 
 Open another new chat and ask:
@@ -97,9 +97,9 @@ Expected result:
 
 The total must remain 150. The old inner-join view now returns only 130 because it drops the unmatched event. This is a useful demonstration of why a successful query can still answer the wrong question.
 
-Click **查看指标证据** under the answer. Check the population, filter, unmatched count and SQL. In **关系与血缘**, the historical relationship should show its original validation and the failed recheck, with an explanation. A metric-scope check must be labeled with that scope; its counts are not a fresh whole-table profile.
+Click **View metric evidence** under the answer. Check the population, filter, unmatched count and SQL. In **Data catalog → Relationships and lineage**, expand **History and invalidated observations**, then open the old relationship. It should show its original validation and the failed recheck, with an explanation. A metric-scope check must be labeled with that scope; its counts are not a fresh whole-table profile.
 
-These are actual panel captures from the synthetic DSH walkthrough. The first keeps the unmatched record in the total; the second links the original validation to the check that invalidated it. The interface is currently in Chinese.
+These are actual panel captures from the synthetic DSH walkthrough. The first keeps the unmatched record in the total; the second links the original validation to the check that invalidated it. These earlier captures use Chinese; the current panel also has an English language selector.
 
 ![Metric evidence retains the unmatched event and its 20 units](../docs/images/missing-record-evidence.png)
 
@@ -108,7 +108,7 @@ These are actual panel captures from the synthetic DSH walkthrough. The first ke
 Independently verify the published expectation:
 
 ```sh
-corepack pnpm demo verify telemetry
+dsh plugin --profile web exec stellane-demo verify telemetry
 ```
 
 **Where this helps:** live data sources, late-arriving mappings, incomplete reference data and reports that silently drop rows. Stellane checks at use time; it does not continuously monitor every external write.
@@ -129,8 +129,8 @@ Run these on Neon branching or Stello using the [multiple-path guide](../docs/ex
 The **support** dataset contains open tickets, estimated effort and two team queues. It uses a different relationship shape and a stated capacity budget. Follow its [dataset notes](datasets/support/README.md), then introduce the changed workload:
 
 ```sh
-corepack pnpm demo drift support
-corepack pnpm demo verify support
+dsh plugin --profile web exec stellane-demo drift support
+dsh plugin --profile web exec stellane-demo verify support
 ```
 
 The changed population contains **six open tickets / 590 estimated minutes**, including **one unassigned ticket / 90 minutes**. On a branching provider, compare:
@@ -160,13 +160,13 @@ For a dedicated PostgreSQL database without Docker, use `psql` to load the chose
 
 ## If something does not match
 
-- **First Docker startup failed:** fix the reported Docker problem and run `demo start` again; incomplete setup keeps its original credentials and volume. Use the same checkout directory. A different checkout cannot manage this demo.
+- **First Docker startup failed:** fix the reported Docker problem and run `demo start` again; incomplete setup keeps its original credentials and volume. Use the same demo state directory (`STELLANE_DEMO_HOME` if set); do not adopt another demo’s resources.
 - **No database found in chat:** confirm the connection and chat use the same absolute project directory.
 - **Different counts:** run `demo status` and `demo verify`; a previous exercise may have left the dataset in the drifted state. Use `reset` for a new discovery exercise.
 - **No saved relationships:** ask the Agent to investigate and remember the supported joins, then inspect the validation records. SQL output alone is not a saved memory.
-- **A query fails:** inspect its error and scope in **任务与结果**. A failed query is not evidence that a relationship holds.
-- **No branch action:** ordinary PostgreSQL and a Neon URL without API access support analysis and memory. Connect a branching provider for the multiple-path exercises.
+- **A query fails:** inspect its error and scope in **Activity and results**. A failed query is not evidence that a relationship holds.
+- **No branch action:** ordinary PostgreSQL and a Neon URL without API access support analysis and memory. Connect [local Neon in Docker](../docs/local-neon.md) or Stello for the multiple-path exercises.
 
 Automated dataset verification uses `pnpm test:demo` after `pnpm dev:db`; it checks the published data and Core behavior on real PostgreSQL. `pnpm demo:branches` exercises real provider branches. A deterministic runner and an actual Agent conversation are reported separately. See [development and testing](../DEVELOPMENT.md).
 
-See [the recorded validation scope](../docs/demo-validation.md) for the actual conversations, deterministic checks and recovery limitations.
+See [the recorded validation scope](../docs/demo-validation.md) for the actual conversations, deterministic checks and recovery limitations, and [independent agent first-use validation](../docs/first-use-validation.md) for the packaged rc.3 walkthrough.

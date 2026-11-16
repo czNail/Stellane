@@ -83,7 +83,7 @@ Agent 可先用 `stellane_checkpoint` 保存共同基线，再以相同基线环
 
 仓库提供确定性演示脚本，直接调用插件使用的 Core，执行公开的方案 SQL 并核对独立预期。它验证分支行为，**不能作为 Agent 自主发现方案的证明**。
 
-在专用 Neon 测试项目里，可用有建表权限的数据库角色导入文件；连接凭据沿用自己的 `PGSERVICEFILE`、`PGPASSFILE` 或 Neon 客户端配置：
+在[本地 Docker Neon 专用来源](local-neon.zh-CN.md)或已有测试来源里，可用有建表权限的数据库角色导入文件；连接凭据沿用自己的 `PGSERVICEFILE`、`PGPASSFILE` 或 Neon 客户端配置：
 
 ```sh
 psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/telemetry/setup.sql
@@ -96,7 +96,7 @@ psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/telemetry/dri
 
 ```sh
 corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset telemetry
-# 或使用具备 API 访问的专用 Neon 来源：
+# 或使用本地 Docker Neon 输出的 provider.json：
 corepack pnpm demo:branches --neon /absolute/path/neon-source.json --dataset telemetry
 ```
 
@@ -116,7 +116,7 @@ corepack pnpm demo:branches status --state-dir /absolute/path/printed-run-direct
 
 ## 保留、清理与中断
 
-成功后保留两份结果和共同基线，供继续核对。Stello 结束并删除临时工作分支。Neon 结果可能依赖工作分支祖先，Stellane 会移除这些工作分支的 compute、关闭本地访问，并说明仍保留的存储。云资源可能继续产生费用。
+成功后保留两份结果和共同基线，供继续核对。Stello 结束并删除临时工作分支。Neon 结果可能依赖工作分支祖先，Stellane 会移除这些工作分支的 compute、关闭本地访问，并说明仍保留的存储。本地 Docker timeline 仍占磁盘，云资源可能产生费用。对聊天中创建的试验，用「管理与清理 → 保留的分支」先回收不需要的结果，再回收没有依赖的父分支。「结束实验」不等于删除所有保留结果。
 
 查看完成功脚本的结果后，只清理这次演示所记录的分支：
 
@@ -134,6 +134,6 @@ corepack pnpm demo:branches reconcile --state-dir /absolute/path/printed-run-dir
 
 它只观察原操作，不创建分支、不重放 SQL。`reviewed` 表示结果已核对、可以显式执行 `cleanup`，**不代表未完成的演示通过了验收**。报告保留最初失败和观察到的资源身份，Core 记录保留中断任务的历史。如果还有未知结果，保留现场，先检查提供方。找不到写入回执时仍保持未知，不会据此重复执行 SQL。
 
-进程崩溃后可能留下 `runner.lock`。先确认其中记录的进程已经退出，再仅删除该锁文件并执行 `reconcile`。不要通过删除整个状态目录掩盖失败。
+进程崩溃后可能留下 `runner.lock`。先确认其中记录的进程已经退出，再仅删除该锁文件并执行 `reconcile`。这与 Core 的 `owner.sqlite` 是两种锁；永远不要删 `owner.sqlite` 绕过占用。不要通过删除整个状态目录掩盖失败。
 
-Stello 提供固定数据切面。Neon 的基线和结果通过 Stellane 只读，外部管理员仍可能修改；历史观察需要复核。Neon 已有 API 契约测试，真实云端验收需另提供账户凭据，尚不能视为完成。脚本只报告实际观测结果，不承诺永久不可变或零资源开销。
+Stello 提供固定数据切面。Neon 的基线和结果通过 Stellane 只读，外部管理员仍可能修改；历史观察需要复核。Neon 的 API 契约测试与真实本地提供方测试分别记录；Docker 路径不需要付费云账号，云端验收不在本预览范围内。脚本只报告实际观测结果，不承诺永久不可变或零资源开销。

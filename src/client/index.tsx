@@ -1,3 +1,4 @@
+import { t, useLocale, labels as localizedLabels } from './i18n.tsx';
 import { useState } from 'react';
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-api-gateway/client';
@@ -21,7 +22,7 @@ import { runStatus } from './explore.tsx';
 import type { Api, ProjectAccess } from './workspace-ui.tsx';
 import { MetricSummary } from './metric.tsx';
 
-const toolLabels: Record<string, string> = {
+const toolLabels: Record<string, string> = localizedLabels({
   stellane_context: '查阅表与口径', stellane_query: '查询数据', stellane_environments: '可用环境', stellane_execute: '提交写入',
   stellane_learn: '核对数据关系',
   stellane_metric: '指标结果',
@@ -29,7 +30,7 @@ const toolLabels: Record<string, string> = {
   stellane_capture_experiment: '保存结果与证据', stellane_finish_experiment: '清理实验',
   stellane_checkpoint: '保存基线', stellane_fork: '创建独立分支', stellane_deliver: '交付方案',
   stellane_results: '收到的结果', stellane_reconcile_write: '核对写入', stellane_reconcile_branch: '核对派生',
-};
+});
 export const inject = ['remote', 'slots'];
 
 function contentText(content: unknown): string | undefined {
@@ -55,16 +56,19 @@ function latestMetric(calls: readonly ToolCallBlock[]): Run | undefined {
 function MetricTurnTail({ turn, readMetric, openEvidence }: TurnTailOwnerProps & {
   readMetric: (turn: number) => Run | undefined; openEvidence: (id: string) => void;
 }) {
+  useLocale();
   if (turn.status !== 'closed') return null;
   const run = readMetric(turn.turn);
   if (!run?.metric) return null;
-  return <section className="st-tool st-metric-tail" aria-label="指标覆盖与证据">
+  return <section className="st-tool st-metric-tail" aria-label={t("指标覆盖与证据")}>
     <MetricSummary metric={run.metric} />
-    <button type="button" onClick={() => openEvidence(run.id)}>查看指标证据</button>
+    <button type="button" onClick={() => openEvidence(run.id)}>{t("查看指标证据")}</button>
   </section>;
 }
-function Icon() { return <span aria-hidden="true" className="st-icon">S</span>; }
+function Icon() {
+  useLocale(); return <span aria-hidden="true" className="st-icon">S</span>; }
 function ToolCard(props: ToolCallViewProps & { openEvidence: (id: string) => void }) {
+  useLocale();
   const [expanded, setExpanded] = useState(false);
   const text = contentText(props.phase === 'result' ? props.block.content : undefined);
   let result: Run | undefined;
@@ -77,11 +81,11 @@ function ToolCard(props: ToolCallViewProps & { openEvidence: (id: string) => voi
   return <div className="st-tool">
     <button onClick={() => setExpanded(value => !value)} aria-expanded={expanded}>
       <Icon /><span>Stellane · {toolLabels[props.toolName] ?? props.toolName}</span>
-      <span className="st-muted">{result ? runStatus[result.status] : props.phase === 'result' ? '已返回' : '处理中'}</span>
+      <span className="st-muted">{result ? runStatus[result.status] : props.phase === 'result' ? t("已返回") : t("处理中")}</span>
     </button>
     {result?.metric && <MetricSummary metric={result.metric} />}
-    {evidenceId && <button type="button" onClick={() => props.openEvidence(evidenceId!)}>查看证据</button>}
-    {expanded && <pre>{text ?? '等待执行结果…'}</pre>}
+    {evidenceId && <button type="button" onClick={() => props.openEvidence(evidenceId!)}>{t("查看证据")}</button>}
+    {expanded && <pre>{text ?? t("等待执行结果…")}</pre>}
   </div>;
 }
 
@@ -94,7 +98,7 @@ export async function apply(ctx: Context): Promise<void> {
 function mountUI(ctx: Context): void {
   const api: Api = async (name, input) => {
     const result = await remoteInfo.methods[`stellane/${name}`]!.invoke(ctx.remote as TypertClientRemote, { input });
-    if (!('ok' in result)) throw new Error('宿主返回了不支持的响应类型。');
+    if (!('ok' in result)) throw new Error(t("宿主返回了不支持的响应类型。"));
     if (!result.ok) throw new Error(result.error.message);
     const reply = result.value as Reply<Responses[typeof name]>;
     if (!reply.success) throw new Error(reply.error);
@@ -117,7 +121,7 @@ function mountUI(ctx: Context): void {
       await ctx.sessions.using(created, { source: 'controllerOperation' }, async reference => {
         const binding = await reference.ready;
         const result = ctx.conversation.input.requestDraftInitialization(binding, { prompt, whenDraftExists: 'keep' });
-        if (result === 'blocked') throw new Error('暂时无法打开对话草稿。');
+        if (result === 'blocked') throw new Error(t("暂时无法打开对话草稿。"));
         ctx.uiWorkspace.openSession(created);
       });
     } else {

@@ -19,33 +19,33 @@
 
 ## 准备本地演示库
 
-先按主 README 安装并构建插件。在运行 Harness Host 的同一台机器上，从 Stellane 项目目录执行，需要 Docker 可用：
+先按主 README 安装预览包，在运行 Harness Host 的同一台机器执行，需要 Docker 可用。前两项分析与记忆演示不需要源码仓库；源码用户可以把全文命令中的 `dsh plugin --profile web exec stellane-demo` 换成 `corepack pnpm demo`：
 
 ```sh
-corepack pnpm demo start
-corepack pnpm demo url
+dsh plugin --profile web exec stellane-demo start
+dsh plugin --profile web exec stellane-demo url
 ```
 
 脚本会创建专用 PostgreSQL 17 容器、只读账号、两套数据和项目目录，端口随机且仅绑定 `127.0.0.1`。它与日常开发数据库分开。
 
 1. 复制 `demo url` 打印的连接地址。
 2. 在 DSH 打开 **Stellane → 数据源 → 添加数据源**，选择 PostgreSQL，粘贴 URL。
-3. 项目目录选择 `demo start` 输出的绝对路径，结尾为 **`.stellane-dev/demo/project`**。连接名称可填写 `Stellane demo`。
+3. 项目目录选择 `demo start` 输出的绝对路径，安装包默认是 **`~/.local/share/stellane-demo/project`**。连接名称可填写 `Stellane demo`。
 4. 点击 **连接并开始使用**。
-5. 在 Harness 工作区侧栏打开这个项目，新建一个普通对话。后续日常操作可以一直在聊天里完成。
+5. 点击连接卡片的 **在项目中提问**，直接进入正确项目的普通对话。之后需要新对话时，将鼠标移到 Harness 工作区侧栏的这个项目名，点击新建会话按钮。后续日常操作可以一直在聊天里完成。
 
-再次执行 `start` 会保留已有数据。连接文件和密码由脚本生成，保存在 Git 忽略的 `.stellane-dev/demo/` 中。
+再次执行 `start` 会保留已有数据。连接文件和密码由脚本生成，安装包保存在 `~/.local/share/stellane-demo/`，源码方式保存在 Git 忽略的 `.stellane-dev/demo/`；绝对路径 `STELLANE_DEMO_HOME` 可以覆盖默认位置。
 
 ```sh
-corepack pnpm demo status
-corepack pnpm demo verify
-corepack pnpm demo stop
+dsh plugin --profile web exec stellane-demo status
+dsh plugin --profile web exec stellane-demo verify
+dsh plugin --profile web exec stellane-demo stop
 ```
 
 `stop` 停止容器并保留数据，`start` 可以恢复。要从头演示，可重建两套模拟数据：
 
 ```sh
-corepack pnpm demo reset
+dsh plugin --profile web exec stellane-demo reset
 ```
 
 `reset` 仅重建演示 schema，表的对象身份会变化，Stellane 里之前保存的观察需要重新验证。
@@ -81,7 +81,7 @@ corepack pnpm demo reset
 保留刚才的连接和记忆，在终端修改一条模拟事件的设备引用：
 
 ```sh
-corepack pnpm demo drift telemetry
+dsh plugin --profile web exec stellane-demo drift telemetry
 ```
 
 再新开对话：
@@ -99,7 +99,7 @@ corepack pnpm demo drift telemetry
 
 总量必须仍为 150。原有内连接视图此时只返回 130，因为它漏掉了那条无法匹配设备的事件。这展示了“SQL 能执行成功”与“回答覆盖了问题要求的数据”之间的差别。
 
-点击回答下方的 **查看指标证据**，检查统计范围、筛选条件、未归因数量和 SQL。在 **关系与血缘** 中找到旧关系，查看原验证、本次检查和失效原因。如果新证据只检查某个指标范围，界面应明确这个范围，不能把数量误当作整表复核。
+点击回答下方的 **查看指标证据**，检查统计范围、筛选条件、未归因数量和 SQL。在 **数据目录 → 关系与血缘** 中展开 **历史与失效记录**，打开旧关系，查看原验证、本次检查和失效原因。如果新证据只检查某个指标范围，界面应明确这个范围，不能把数量误当作整表复核。
 
 下面是这套模拟数据在真实 DSH 对话后的面板截图。指标证据保留了未归因记录；旧关系同时保留原验证和使其失效的本次检查。
 
@@ -110,7 +110,7 @@ corepack pnpm demo drift telemetry
 独立核对公开的预期结果：
 
 ```sh
-corepack pnpm demo verify telemetry
+dsh plugin --profile web exec stellane-demo verify telemetry
 ```
 
 **适用场景：** 实时数据、迟到的映射信息、不完整的维表，以及会悄悄丢掉记录的关联报表。复核在使用时发生，Stellane 当前不会持续监听所有外部写入。
@@ -131,8 +131,8 @@ corepack pnpm demo verify telemetry
 **support** 数据集包含工单、预计工作量、两个队列及容量预算，使用另一种关系结构。先看[数据说明](datasets/support/README.md)，再引入工作量变化：
 
 ```sh
-corepack pnpm demo drift support
-corepack pnpm demo verify support
+dsh plugin --profile web exec stellane-demo drift support
+dsh plugin --profile web exec stellane-demo verify support
 ```
 
 变化后共有 **6 张未关闭工单、590 分钟预计工作量**，其中 **1 张工单、90 分钟尚未分配**。在分支提供方上比较：
@@ -162,13 +162,13 @@ Manifest 用于复现和独立验收。普通对话里的探索由 Agent 完成�
 
 ## 常见问题
 
-- **首次 Docker 启动失败：** 处理提示的 Docker 问题后，再运行 `demo start`。未完成的初始化会沿用原凭据与数据卷。请在原 checkout 目录继续；另一份 checkout 不能管理这套演示库。
+- **首次 Docker 启动失败：** 处理提示的 Docker 问题后，再运行 `demo start`。未完成的初始化会沿用原凭据与数据卷。请继续使用同一演示状态目录（设置过 `STELLANE_DEMO_HOME` 时也保持一致），不要接管另一套演示资源。
 - **对话找不到数据源：** 核对连接与聊天是否使用相同的绝对项目目录。
 - **数字与预期不同：** 用 `demo status` 和 `demo verify` 看当前阶段；上一次演示可能已改过数据。重新做首次探索时执行 `reset`。
 - **没看到保存的关系：** 明确让 Agent 调查并记住经过验证的关联，再检查目录里的证据。查询结果本身不等于已保存记忆。
 - **SQL 失败：** 在「任务与结果」检查错误和数据范围。失败的查询不能当作关系成立的证据。
-- **不能开始分支试验：** 普通 PG 和仅使用 URL 的 Neon 支持分析与记忆，隔离写入需另接分支能力。
+- **不能开始分支试验：** 普通 PG 和仅使用 URL 的 Neon 支持分析与记忆，隔离写入需另接[本地 Docker Neon](../docs/local-neon.zh-CN.md) 或 Stello。
 
 执行 `pnpm dev:db` 后可运行 `pnpm test:demo`，用真实 PG 检查公开数据、预期数字和 Core 行为。`pnpm demo:branches` 使用真实提供方分支。确定性脚本验收与实际 Agent 对话分别记录，具体见[开发与验收](../DEVELOPMENT.md)。
 
-实际对话、脚本检查与恢复限制分别记录在[本次演示验收记录](../docs/demo-validation.md)中。
+实际对话、脚本检查与恢复限制分别记录在[本次演示验收记录](../docs/demo-validation.md)中。安装包在 rc.3 的完整上手过程另见[独立代理首次使用验收](../docs/first-use-validation.zh-CN.md)。

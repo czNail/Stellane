@@ -1,15 +1,24 @@
+#!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const state = join(root, '.stellane-dev', 'demo');
+const development = existsSync(join(root, 'src', 'core', 'index.ts'));
+const entry = development ? 'pnpm demo' : 'dsh plugin --profile web exec stellane-demo';
+const guide = join(root, 'examples', 'README.md');
+if (process.env.STELLANE_DEMO_HOME && !isAbsolute(process.env.STELLANE_DEMO_HOME)) throw new Error('STELLANE_DEMO_HOME must be an absolute path.');
+const state = resolve(process.env.STELLANE_DEMO_HOME ?? (development ? join(root, '.stellane-dev', 'demo') : join(homedir(), '.local', 'share', 'stellane-demo')));
 const provisionFile = join(state, 'provision.json');
 const project = join(state, 'project');
-const owner = 'stellane-community-demo';
+// Retain existing source-checkout demos. Fresh installations use a stable,
+// state-specific identity, so a second checkout cannot manage the first one.
+const owner = existsSync(join(state, 'connection.json')) && !existsSync(join(state, 'instance-name'))
+  ? 'stellane-community-demo' : `stellane-demo-${createHash('sha256').update(state).digest('hex').slice(0, 10)}`;
 const containerName = owner;
 const volumeName = `${owner}-data`;
 const database = 'stellane_demo';
@@ -19,16 +28,16 @@ const command = process.argv[2] ?? 'help';
 const selected = process.argv[3];
 const help = `Stellane synthetic demos (Docker + PostgreSQL 17)
 
-  pnpm demo start                 Create or resume the private demo database
-  pnpm demo status                Show the project, connection file and data stages
-  pnpm demo url                   Print the local demo connection URL for pasting
-  pnpm demo verify [dataset]      Compare live data with the independent expectations
-  pnpm demo drift [dataset]       Break one known relationship (default: telemetry)
-  pnpm demo reset                 Restore both synthetic datasets; old memories become stale
-  pnpm demo stop                  Stop this demo container; retain its data
+  ${entry} start                 Create or resume the private demo database
+  ${entry} status                Show the project, connection file and data stages
+  ${entry} url                   Print the local demo connection URL for pasting
+  ${entry} verify [dataset]      Compare live data with the independent expectations
+  ${entry} drift [dataset]       Break one known relationship (default: telemetry)
+  ${entry} reset                 Restore both synthetic datasets; old memories become stale
+  ${entry} stop                  Stop this demo container; retain its data
 
 Datasets: telemetry, support. Only this helper's labeled container and demo schemas are changed.
-Start with examples/README.md or examples/README.zh-CN.md.`;
+Guide: ${guide} (Chinese: README.zh-CN.md alongside it).`;
 
 function docker(args, options = {}) {
   return execFileSync('docker', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], ...options }).trim();
@@ -91,7 +100,7 @@ function metadata() {
 }
 function current() {
   const meta = metadata();
-  if (!meta || meta.version !== version()) throw new Error('Demo files and database differ. Run pnpm demo reset to recreate only the two synthetic schemas.');
+  if (!meta || meta.version !== version()) throw new Error(`Demo files and database differ. Run ${entry} reset to recreate only the two synthetic schemas.`);
   return meta;
 }
 function seed(reset) {
@@ -120,7 +129,7 @@ function check(name, meta = current()) {
   console.log(JSON.stringify({ dataset: name, stage, verified: true, rows }, null, 2));
 }
 function show(info) {
-  console.log(`Demo ${info?.State.Running ? 'running' : 'stopped'}.\nProject: ${project}\nConnection URL file: ${join(state, 'connection-url.txt')}\nCopy with: pnpm demo url\nGuide: examples/README.md`);
+  console.log(`Demo ${info?.State.Running ? 'running' : 'stopped'}.\nProject: ${project}\nConnection URL file: ${join(state, 'connection-url.txt')}\nCopy with: ${entry} url\nGuide: ${guide}`);
   if (info?.State.Running) {
     const meta = current();
     console.log(`Last managed stages: ${JSON.stringify(meta.phases)}`);
@@ -144,13 +153,14 @@ async function main() {
   }
   if (command === 'status') {
     if (info) show(info);
-    else if (provision()?.status === 'pending') console.log('Demo setup is incomplete. Run pnpm demo start to resume the recorded setup.');
+    else if (provision()?.status === 'pending') console.log(`Demo setup is incomplete. Run ${entry} start to resume the recorded setup.`);
     else if (volume) console.log('The owned demo volume has no container. Inspect the retained data before recreating the container.');
-    else console.log('No demo exists yet. Run pnpm demo start.');
+    else console.log(`No demo exists yet. Run ${entry} start.`);
     return;
   }
   mkdirSync(project, { recursive: true, mode: 0o700 });
   chmodSync(state, 0o700);
+  if (owner !== 'stellane-community-demo') writeFileSync(join(state, 'instance-name'), owner + '\n', { mode: 0o600 });
   const passwordFile = join(state, 'reader-password');
   if (command === 'start') {
     if (!info) {
@@ -177,7 +187,7 @@ async function main() {
       try { sql('SELECT 1'); ready = true; break; }
       catch { await new Promise(resolve => setTimeout(resolve, 500)); }
     }
-    if (!ready) throw new Error('The demo PostgreSQL did not become ready within 30 seconds. Check docker logs stellane-community-demo.');
+    if (!ready) throw new Error(`The demo PostgreSQL did not become ready within 30 seconds. Check docker logs ${containerName}.`);
     if (!existsSync(passwordFile)) throw new Error('The local demo password file is missing. Existing data was retained.');
     const password = readFileSync(passwordFile, 'utf8').trim();
     if (!/^[a-f0-9]{48}$/.test(password)) throw new Error('The local demo password has an unexpected format.');
@@ -198,7 +208,7 @@ async function main() {
     show(info);
     return;
   }
-  if (!info?.State.Running) throw new Error('Start the private demo with pnpm demo start first.');
+  if (!info?.State.Running) throw new Error(`Start the private demo with ${entry} start first.`);
   if (command === 'url') { console.log(readFileSync(join(state, 'connection-url.txt'), 'utf8').trim()); return; }
   if (command === 'reset') { seed(true); for (const name of datasets) check(name); console.log('Both synthetic schemas reset. Previously saved observations must be checked again.'); return; }
   const meta = current();

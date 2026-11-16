@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-agent';
@@ -16,10 +17,11 @@ import { PACKAGE, remoteInfo, type Reply, type Requests, type Responses } from '
 import type { Actor, BranchOperation, Connection, DatabaseTarget, DeliveredResult, Environment, Run, Snapshot } from '../shared/models.ts';
 import { dataSkill } from './data-skill.ts';
 import { describeEnvironment } from '../shared/capabilities.ts';
+import { readLocalNeonConfig } from '../core/neon-local-onboarding.ts';
 
 export interface Config { stateDirectory?: string }
 export const Config = Schema.object({
-  stateDirectory: Schema.string().description('Stellane 本地状态目录（绝对路径）。').default(join(homedir(), '.local/share/stellane')),
+  stateDirectory: Schema.string().description('Stellane state directory (absolute path). Defaults to this DSH profile; existing legacy data is preserved.'),
 });
 export const inject = ['tools', 'typert', 'workspaceRegistry', 'sessions', 'skills', 'systemPrompt'];
 
@@ -37,6 +39,12 @@ export class StellaneService extends TypertRemoteService {
   snapshot(_input: Requests['snapshot'], _signal: AbortSignal): Promise<Reply<Snapshot>> {
     return this.owner(() => this.core.snapshot());
   }
+  management(_input: Requests['management'], _signal: AbortSignal): Promise<Reply<Responses['management']>> {
+    return this.owner(() => this.core.management());
+  }
+  manage(input: Requests['manage'], signal: AbortSignal): Promise<Reply<Responses['manage']>> {
+    return this.owner(() => this.core.manage(input, { kind: 'user', id: 'owner' }, signal));
+  }
   saveConnection(input: Requests['saveConnection'], _signal: AbortSignal): Promise<Reply<Connection>> {
     return this.owner(() => this.core.saveConnection(input));
   }
@@ -45,6 +53,13 @@ export class StellaneService extends TypertRemoteService {
   }
   connectNeon(input: Requests['connectNeon'], signal: AbortSignal): Promise<Reply<Environment>> {
     return this.owner(() => this.core.connectNeon(input, signal));
+  }
+  connectLocalNeon(input: Requests['connectLocalNeon'], signal: AbortSignal): Promise<Reply<Environment>> {
+    return this.owner(async () => {
+      const source = await readLocalNeonConfig(input.configPath);
+      return this.core.saveNeon({ ...source, ...(input.projectPath ? { projectPath: input.projectPath } : {}),
+        ...(input.name ? { name: input.name } : {}) }, signal);
+    });
   }
   saveNeon(input: Requests['saveNeon'], signal: AbortSignal): Promise<Reply<Environment>> {
     return this.owner(() => this.core.saveNeon(input, signal));
@@ -130,7 +145,10 @@ export class StellaneService extends TypertRemoteService {
 }
 
 export function apply(ctx: Context, config: Config): void {
-  const directory = config.stateDirectory ?? join(homedir(), '.local/share/stellane');
+  const legacy = join(homedir(), '.local/share/stellane');
+  const profile = ctx.get('profileContext') as { dir?: string } | undefined;
+  const directory = config.stateDirectory ?? (existsSync(join(legacy, 'state.sqlite')) ? legacy
+    : profile?.dir && isAbsolute(profile.dir) ? join(profile.dir, 'stellane-state') : legacy);
   if (!isAbsolute(directory)) throw new Error('Stellane 状态目录必须是绝对路径。');
   const core = new StellaneCore(directory);
   new StellaneService(ctx, core);

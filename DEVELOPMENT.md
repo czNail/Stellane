@@ -4,7 +4,7 @@
 
 ## 当前能力
 
-Core 在 Harness Host 内运行，支持 DeepSeek Harness Web `0.2.2-rc.1`：
+Core 在 Harness Host 内运行，面向 DeepSeek Harness Web `0.2.2-rc.1–rc.3`，开发依赖固定为 rc.3：
 
 - PostgreSQL / Neon 连接 URL 一次接入，测试连接后自动建立实时只读环境。
 - 普通项目对话使用内置 Skill 查目录、查数据、复用关系和启动受支持的实验。
@@ -47,45 +47,22 @@ corepack pnpm dev:db stop
 
 ### Neon
 
-普通分析只需要 Neon 控制台提供的 PostgreSQL 连接 URL，使用与普通 PG 相同的只读 SQL、目录、血缘和记忆能力。连接向导的「启用独立试验」另接收项目 ID、来源分支 ID 和 API key；Host 将 API key 保存为私有凭据引用。
-
-管理 API 使用 [Neon 官方 v2 接口](https://neon.com/docs/reference/api-reference)。适配器记录项目 ID、分支 ID、创建时间、父分支与来源位置、重置时间和 compute 身份。实验写入限于插件创建的工作分支。来源连接保持只读，基线和结果使用只读 compute；外部出现可写 compute 或分支被重置时拒绝沿用原状态。
-
-Neon 的只读分支不提供与 Stello 固定切面相同的不可变保证。记忆始终需要在使用前复核。保留结果时，Neon 要求保留它依赖的父链；结束实验会关闭临时环境访问并删除基线/工作分支的 compute，保留必要的分支存储和结果。任务中保存 `retentionNote`，明确仍可能产生费用。没有交付结果的实验可按叶到根顺序删除自身分支。
-
-本地 API 契约测试无需云端凭据：
+普通 Neon PostgreSQL URL 具备查询、目录、血缘和记忆能力，不必配置管理 API。需要独立分支时，预览版优先使用真实的 Docker 开源 Neon 开发环境，不要求云账号或付费资源：
 
 ```sh
-corepack pnpm test:neon
+corepack pnpm dev:neon start
+corepack pnpm dev:neon status
+STELLANE_NEON_LOCAL_CONFIG="$PWD/.stellane-dev/neon-local/provider.json" corepack pnpm test:neon:local
+corepack pnpm dev:neon stop
 ```
 
-契约测试验证请求、异步操作、身份核对和失败恢复。它没有创建真实 Neon 云资源。
+在「添加数据源」选 **Neon (Docker)**，导入输出的 `provider.json` 绝对路径。详细的架构、实例隔离、样例导入和恢复步骤见[本地 Neon 指南](docs/local-neon.zh-CN.md)。这是 Stellane 的本地开发控制器，不是 Neon 官方云管理面，也不是依赖云项目的 Neon Local 代理。服务是实际的 pageserver、broker、safekeeper 和 compute；单节点环境不提供高可用保证。
 
-真实云端验收另有显式入口 `pnpm test:neon:live`。先准备专用测试项目与来源分支，数据库角色须能在派生分支的 `public` schema 创建测试表，API key 须能管理该项目的分支和 compute。来源可以保持业务空库；脚本仅在自己创建的实验工作分支写入三行合成数据。项目应有至少三个可用分支名额，以及测试期间的 compute/存储额度。
+适配器保存项目、分支、创建时间、来源位置、重置时间和 compute 身份。来源在 Stellane 中只读，写入仅在插件派生的工作分支。基线与结果的只读管理不等于外部管理员无法更改，因此记忆使用前仍复核。保留结果可能依赖父 timeline；结束实验关闭临时 compute，保留必要存储。「管理与清理 → 保留的分支」显示原因，按先子后父回收。Docker timeline 占本机磁盘。
 
-在仓库外保存配置 JSON，`projectPath` 指向一个已存在的本地目录，`apiKeyRef` 引用 Host 环境变量或权限为 `600` 的凭据文件：
+`pnpm test:neon` 是无外部凭据的 API 契约测试；`test:neon:local` 是真实本地 A/B 与产品清理验收，环境不可用时失败，不会跳过。云端 `test:neon:live` 缺少 `STELLANE_NEON_CONFIG` 时明确跳过，不能当作通过。失败保留原状态、报告和删除意图，先核对原操作，不要重新跑一轮替代恢复。
 
-```json
-{
-  "name": "Neon live validation",
-  "projectPath": "/absolute/path/to/test-project",
-  "projectId": "your-neon-project-id",
-  "branchId": "br-your-test-source",
-  "database": "neondb",
-  "user": "your-test-role",
-  "apiKeyRef": "env:NEON_API_KEY"
-}
-```
-
-配置好引用的凭据后执行：
-
-```sh
-STELLANE_NEON_CONFIG=/absolute/path/to/neon-test.json corepack pnpm test:neon:live
-```
-
-未设置 `STELLANE_NEON_CONFIG` 时，此测试明确显示 **skipped**。测试覆盖真实建分支、隔离写入、保存结果、来源没有测试表、兄弟会话拒绝访问、只读结果上的记忆仍需复核，以及结束实验后的保留说明。正常完成后，再按已记录的精确身份从叶到根删除本次测试的结果、工作和基线分支，保留配置的来源；这一步专用于测试资源收尾，不改变产品默认保留结果的行为。
-
-任何步骤失败或结果未知都会保留临时目录中的 `state.sqlite`、`report.json` 与清理请求，输出待核对的目录路径。先核对原操作，再处理清理；不要以重新运行测试代替原操作恢复。测试可能产生 Neon 费用，失败保留的资源也可能继续计费。未提供真实凭据时，只能报告该入口跳过，不能宣称云端验收通过。
+Neon 云端 API 适配器仍是实验性入口，本预览不要求购买或执行云端验收。如已有专用云测试资源，可自行提供 JSON：`name`、已存在的绝对 `projectPath`、`projectId`、`branchId`、`database`、`user`、`apiKeyRef`（`env:` 或私有 `file:` 引用）。不要设置 `localEndpoint`；显式将此配置交给 `STELLANE_NEON_CONFIG` 才会访问云端。云端会占用相应分支、compute 和存储额度，本地成功不能替代云端验收。
 
 ### Stello
 
@@ -174,7 +151,7 @@ corepack pnpm dev:stello stop --instance context-check
 
 元数据读取保存为 `purpose: context` 的执行证据，不占用面板的业务 SQL 查询历史。
 
-初版上限：64 个可读对象，每对象 256 个字段、128 条约束，元数据响应 128 KiB；每文档 64 KiB / 16 条定义，每数据源保留最多 128 个定义版本（含历史），单次检索最多返回 16 个对象及 16 条定义。超限时明确失败，不把部分元数据当作完整目录。
+初版上限：64 个可读对象，每对象 256 个字段、128 条约束，元数据响应 128 KiB；每文档 64 KiB / 16 条定义，每数据源最多 128 个未归档定义版本（包括未归档历史）；归档释放此容量并保留证据，单次检索最多返回 16 个对象及 16 条定义。超限时明确失败，不把部分元数据当作完整目录。
 
 ## 探索记忆
 
@@ -186,7 +163,7 @@ corepack pnpm dev:stello stop --instance context-check
 
 通过后自动保存，按项目与环境共享。证据记录实际对象、执行记录、观测时间与快照。Stello 固定切面可以读取适用观察。实时库、可写分支和 Neon 只读分支的观察标为 `needs-check`，沿用前调用同一条 `stellane_learn`。重新核对失败时，旧观察退出正常检索；失效关系另记录原因与原、新证据，供指标工具复核已知路径。对象结构、权限或资源身份变化也会排除旧观察。
 
-首版检查无子表且未启用行级安全的普通表，支持最多 8 列的复合键和常见内建标量类型。每环境最多保存 128 个观察版本。视图目录读取最多 256 条可见依赖。目录读取和关系检查各受 5 秒只读 SQL 时限和预览大小限制。
+首版检查无子表且未启用行级安全的普通表，支持最多 8 列的复合键和常见内建标量类型。每环境最多保存 128 个未归档观察版本；归档后停止复用并释放容量，历史证据仍保留。视图目录读取最多 256 条可见依赖。目录读取和关系检查各受 5 秒只读 SQL 时限和预览大小限制。
 
 ## 指标与修复证据
 
@@ -206,7 +183,9 @@ Agent 身份、调用 ID 和项目目录来自 Harness 执行上下文；Core �
 
 每次连接核对 Stello 服务、槽位、代次与资源 ID。同名重建不能替代旧环境，派生记录保存原准入、创建标识、父身份与实际固定位置。
 
-本地状态默认为 `~/.local/share/stellane/state.sqlite`，目录 `700`、文件 `600`。插件的 `stateDirectory` 可指定其他绝对路径，单个 Host 管理一套状态。
+插件的绝对路径 `stateDirectory` 优先；未设置时先沿用已有的 `~/.local/share/stellane/state.sqlite`，全新安装才使用 DSH profile 下的 `stellane-state`（无 profile 信息时回退旧路径）。目录 `700`、文件 `600`。状态格式为 7，升级前在 `backups/` 保存包含 WAL 已提交数据的一致快照。单目录用 `owner.sqlite` 排他锁防止多 Host 写入，进程退出即释放，不能删锁绕过。早期开发版没有新格式守卫，升级前必须停止，不能直接降级读新版状态。完整步骤见[维护指南](docs/install-and-maintain.zh-CN.md)。
+
+管理页允许所有者停用 / 启用来源、验证后轮换凭据、归档记忆与定义、精确回收保留分支、移除连接，或明确确认删除来源的本地资料与历史。停用拦截新操作，但保留证据和原操作收尾。移除 / 删除需要先处理活动、未知操作与保留资源。来源数据库和用户外部凭据永远不删，归档与连接移除保留证据；删除本地历史也不清理备份、DSH 聊天或模型方日志。
 
 - 单条 SQL 最多 16 KiB、32 个标量参数；预览最多 200 行、128 KiB。只读查询限时 5 秒，写入事务中的语句限时 30 秒。
 - 每个 Core 最多 4 个并发操作，每项目最多 16 个环境，包含待核实派生。单环境写入与固定互斥，同一数据库的派生准入串行，兄弟分支 SQL 可并行。
@@ -271,7 +250,7 @@ corepack pnpm demo:branches status --state-dir /absolute/path/printed-run-direct
 corepack pnpm demo:branches cleanup --state-dir /absolute/path/printed-run-directory
 ```
 
-清理按记录的真实身份处理分支，保留来源与本地证据。Neon 需要保留结果的父链，保留期间可能计费；失败或未知操作先按指南核对，不能另起一轮代替恢复。比较和选择方案不会自动合并到生产库。真实 Neon 云端结果必须单独记录，缺少凭据时保持未验证状态。
+清理按记录的真实身份处理分支，保留来源与本地证据。Neon 需要保留结果的父链；Docker 占本机磁盘，云端资源可能计费；失败或未知操作先按指南核对，不能另起一轮代替恢复。比较和选择方案不会自动合并到生产库。真实 Neon 云端结果必须单独记录，缺少凭据时保持未验证状态。
 
 ## 检查与验收
 
@@ -280,9 +259,12 @@ corepack pnpm check
 corepack pnpm test:integration
 corepack pnpm test:neon
 corepack pnpm test:stello
+corepack pnpm test:package
 ```
 
-`check` 包含 Host / Client 类型检查、Core、连接向导、Neon 契约测试和构建。PG 集成测试覆盖真实 SQL、参数、预览限制、只读拒绝和取消；`tests/community.test.ts` 另覆盖普通 PG 的跨对话关系复用、数据变化后的失效与指标证据。语义目录集成测试覆盖元数据与权限、自然语言关键词检索、定义更新与并发版本检查、数据变化和结构变化的区别、失效排除及重启保留。Stello 集成测试验证固定位置、分支观测和语义定义继承，以及持久状态继承、并发兄弟隔离、固定结果、嵌套派生、项目与资源身份检查、事务控制拒绝，以及重启后通过回执确认提交而不重放 SQL。
+`test:package` 构建 tgz，检查分发文件和私有文件排除，再在无源码的临时目录安装包，执行包内演示命令。CI 在 Ubuntu 的 Node 24.9.0 / 24.x 执行基础检查，另用真实 PostgreSQL 运行集成检查并上传已验证的 tgz。DSH rc.1 与 rc.3 的发行包安装 / UI 验收另行记录，不能由类型检查代替。
+
+`check` 包含 Host / Client 类型检查、Core、连接向导、Neon 契约、状态迁移 / 互斥、管理生命周期测试和构建。PG 集成测试覆盖真实 SQL、参数、预览限制、只读拒绝和取消；`tests/community.test.ts` 另覆盖普通 PG 的跨对话关系复用、数据变化后的失效与指标证据。语义目录集成测试覆盖元数据与权限、自然语言关键词检索、定义更新与并发版本检查、数据变化和结构变化的区别、失效排除及重启保留。Stello 集成测试验证固定位置、分支观测和语义定义继承，以及持久状态继承、并发兄弟隔离、固定结果、嵌套派生、项目与资源身份检查、事务控制拒绝，以及重启后通过回执确认提交而不重放 SQL。
 
 探索记忆测试覆盖视图链、复合键、多对一关系、跨 Agent 检索、失效、权限和重启保留。Stello 测试覆盖同项目任务隔离、证据失败后复用原切面、工作分支清理和重启后读取交付。报告保存在所选 `provider.json` 同目录的 `integration-report.json` 和 `experiment-report.json`。
 
@@ -293,8 +275,9 @@ corepack pnpm test:stello
 1. **普通 PostgreSQL 独立验收。** 只提供连接 URL，连接后直接在普通项目对话提问。确认一次接入即可查询，目录、视图血缘和关系记忆不依赖 Neon API 或 Stello。
 2. **跨对话记忆与变化。** 建两到三张有隐性等值关系的表和一个视图，首次查询让 Agent 验证并保存关联。新对话查询另一个指标，确认读到原关系且执行复核。由测试维护者修改来源数据，使一条关联失效，再开对话查询；检查未归因数量、旧关系失效原因和原、新证据。
 3. **范围与权限。** 同项目的普通对话可访问共享来源；不同项目不可见。同项目其他会话不能读取某个任务的私有分支、执行记录或交付结果。源码或表结构变化后不能悄悄沿用旧定义。
-4. **分支实验。** 对 Neon API 来源和 Stello 分别保存一次共享基线，从同一基线创建 A/B 隔离试验，修改各自工作分支，用同一口径保存基线与方案证据。核对兄弟分支互不影响，独立查询来源确认原数据未变。模拟响应丢失或重启，验证原操作核对不会重复创建资源或写入。
+4. **分支实验。** 对本地 Neon 来源和 Stello 分别保存一次共享基线，从同一基线创建 A/B 隔离试验，修改各自工作分支，用同一口径保存基线与方案证据。核对兄弟分支互不影响，独立查询来源确认原数据未变。模拟响应丢失或重启，验证原操作核对不会重复创建资源或写入。
 5. **清理与保留。** Stello 归还临时工作资源并保留结果。Neon 显示保留父链的原因，临时 compute 与访问已关闭，保存结果仍有证据可查；没有结果时验证自有分支删除完成。
-6. **界面路径。** 从普通对话直接打开指标证据，核对覆盖状态；从失效关系打开两份验证；从实验查看进度、前后比较与清理状态。重启 Host 后历史记录仍存在。
+6. **管理。** 停用后 Agent 不可查询，但所有者能查看原证据和核对。轮换失败仍用原凭据，成功沿用证据；归档释放容量。按子先父回收准确身份的分支；移除连接保留历史，强确认删除本地资料后来源库保持不变。
+7. **界面路径。** 从普通对话直接打开指标证据，核对覆盖状态；从失效关系打开两份验证；从实验查看进度、前后比较与清理状态。重启 Host 后历史记录仍存在。
 
 保存测试提供方、版本、运行时间、独立预期答案、来源复查和资源状态。记录未执行的真实云端步骤，不把接口模拟或合成业务的单次收益写成生产保证。

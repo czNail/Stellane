@@ -36,6 +36,7 @@ export interface Environment {
   mode: 'live' | 'fixed' | 'branch'; access: 'read-only' | 'read-write'; createdAt: string;
   parentEnvironmentId?: string; stello?: BranchBinding; neon?: NeonBinding;
   experimentId?: string; removedAt?: string; retainedReason?: string;
+  disabledAt?: string; resourceDeletedAt?: string; resourceRemovalPendingAt?: string; managedCredentialRefs?: string[];
 }
 export const deriveInput = z.strictObject({
   environmentId: z.string().uuid(), name: z.string().trim().min(1).max(80),

@@ -1,42 +1,43 @@
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { acquireStateLock } from './state-lock.ts';
+import { checkStateVersion, migrateState } from './state-schema.ts';
 import type { BranchOperation, BranchRemoval, Connection, ConversationScope, Delivery, Environment, Experiment, Run, StelloSource } from '../shared/models.ts';
 import type { CatalogImport, ContextRecord, SemanticDefinition } from '../shared/context-models.ts';
 import type { ProfiledKnowledge } from '../shared/knowledge-models.ts';
 import type { NeonSource, NeonRemoval } from '../shared/neon-models.ts';
 
-interface Records { connections: Connection; environments: Environment; runs: Run; providers: StelloSource; operations: BranchOperation; deliveries: Delivery;
+export interface Records { connections: Connection; environments: Environment; runs: Run; providers: StelloSource; operations: BranchOperation; deliveries: Delivery;
   contexts: ContextRecord; definitions: SemanticDefinition; catalogImports: CatalogImport; knowledge: ProfiledKnowledge;
   experiments: Experiment; scopes: ConversationScope; removals: BranchRemoval; neonSources: NeonSource; neonRemovals: NeonRemoval }
 
 export class Store {
   private readonly db: DatabaseSync;
+  private readonly releaseLock: () => void;
+  private closed = false;
+  readonly migrationBackup?: string;
   constructor(directory: string) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     chmodSync(directory, 0o700);
-    const filename = join(directory, 'state.sqlite');
-    this.db = new DatabaseSync(filename);
-    chmodSync(filename, 0o600);
-    this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
-      CREATE TABLE IF NOT EXISTS connections (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS environments (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS providers (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS deliveries (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS contexts (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS definitions (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS definitions_scope ON definitions(json_extract(body,'$.projectPath'),json_extract(body,'$.dataSourceId'));
-      CREATE TABLE IF NOT EXISTS catalogImports (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS knowledge (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS experiments (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS scopes (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS removals (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS neonSources (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS neonRemovals (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS knowledge_environment ON knowledge(json_extract(body,'$.environmentId'));
-      PRAGMA user_version=6;`);
+    this.releaseLock = acquireStateLock(directory);
+    let db: DatabaseSync | undefined;
+    try {
+      const filename = join(directory, 'state.sqlite');
+      const previousVersion = checkStateVersion(filename);
+      db = new DatabaseSync(filename);
+      this.db = db;
+      chmodSync(filename, 0o600);
+      db.exec('PRAGMA busy_timeout=5000; PRAGMA secure_delete=ON;');
+      this.migrationBackup = migrateState(db, directory, previousVersion);
+      db.exec('PRAGMA journal_mode=WAL;');
+      this.recoverInterrupted();
+    } catch (error) {
+      try { db?.close(); } finally { this.releaseLock(); }
+      throw error;
+    }
+  }
+  private recoverInterrupted(): void {
     const unfinished = this.db.prepare("SELECT body FROM runs WHERE json_extract(body, '$.status') = 'running'").all();
     for (const row of unfinished) {
       const run = JSON.parse(row.body as string) as Run;
@@ -54,6 +55,13 @@ export class Store {
   list<K extends keyof Records>(table: K, limit = 500): Records[K][] {
     return this.db.prepare(`SELECT body FROM ${table} ORDER BY rowid DESC LIMIT ?`).all(Math.max(1, Math.min(limit, 500)))
       .map(row => JSON.parse(row.body as string));
+  }
+  listAll<K extends keyof Records>(table: K): Records[K][] {
+    return this.db.prepare(`SELECT body FROM ${table} ORDER BY rowid DESC`).all()
+      .map(row => JSON.parse(row.body as string));
+  }
+  delete<K extends keyof Records>(table: K, id: string): boolean {
+    return this.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id).changes > 0;
   }
   get<K extends keyof Records>(table: K, id: string): Records[K] {
     const value = this.find(table, id);
@@ -109,5 +117,9 @@ export class Store {
     this.db.prepare(`INSERT INTO ${table} (id, body) VALUES (?, ?)
       ON CONFLICT(id) DO UPDATE SET body = excluded.body`).run(value.id, JSON.stringify(value));
   }
-  close(): void { this.db.close(); }
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    try { this.db.close(); } finally { this.releaseLock(); }
+  }
 }

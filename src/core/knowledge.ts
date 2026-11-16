@@ -88,6 +88,7 @@ export class KnowledgeMemory {
       const item = { id, version, fact, evidence, ...(invalidation ? { invalidation } : {}) };
       const superseded = seen.has(record.key);
       seen.add(record.key);
+      if (record.archivedAt) return { ...item, status: 'archived', reason: '用户已归档，后续检索不再使用；历史证据保留。' };
       const tables = knowledgeTables(fact);
       if (tables.some(table => !relationFor(table, metadata.relations))) {
         return { ...item, status: 'stale', reason: '关联对象当前不可读取。' };
@@ -141,7 +142,7 @@ export class KnowledgeMemory {
       const versions = this.store.knowledge(context.environmentId);
       const previous = versions.find(record => record.key === key);
       const reject = (reason: string): LearnResult => {
-        if (previous && previous.dependencyFingerprint === dependencyFingerprint) {
+        if (previous && !previous.archivedAt && previous.dependencyFingerprint === dependencyFingerprint) {
           this.store.put('knowledge', { ...previous, invalidation: { reason, evidence: observed, unmatchedRows: unmatched } });
         }
         return { accepted: false, reason, evidence: observed };
@@ -158,9 +159,9 @@ export class KnowledgeMemory {
         if (unmatched !== '0') return reject('存在未匹配记录，当前数据不支持完整关联。');
         fact = { ...claim, cardinality: source.duplicateKeys === '0' ? 'one-to-one' : 'many-to-one', source, target, unmatchedRows: unmatched };
       }
-      const sameConclusion = previous && !previous.invalidation && previous.dependencyFingerprint === dependencyFingerprint
+      const sameConclusion = previous && !previous.archivedAt && !previous.invalidation && previous.dependencyFingerprint === dependencyFingerprint
         && (fact.kind === 'row-key' || (previous.fact.kind === 'join' && previous.fact.cardinality === fact.cardinality));
-      if (!sameConclusion && versions.length >= 128) throw new Error('此环境已保存 128 个知识版本。');
+      if (!sameConclusion && versions.filter(record => !record.archivedAt).length >= 128) throw new Error('此环境已保存 128 个未归档知识版本，请在管理中归档不再使用的资料。');
       const record: ProfiledKnowledge = { id: sameConclusion ? previous.id : randomUUID(), environmentId: context.environmentId,
         key, version: sameConclusion ? previous.version : (previous?.version ?? 0) + 1, fact, evidence: observed, dependencyFingerprint };
       this.store.put('knowledge', record);

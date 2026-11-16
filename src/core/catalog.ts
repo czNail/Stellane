@@ -44,6 +44,7 @@ export class SemanticCatalog {
     const latest = new Map<string,SemanticDefinition>();
     for (const definition of definitions) if (!latest.has(definition.key) || latest.get(definition.key)!.version<definition.version) latest.set(definition.key,definition);
     const versions: DefinitionStatus[] = definitions.map(definition => {
+      if (definition.archivedAt) return { definition,status:'archived',reason:'用户已归档，后续检索不再使用；历史证据保留。' };
       if (latest.get(definition.key)!.id!==definition.id) return { definition,status:'superseded',reason:'同一 key 已有更新版本。' };
       if (definition.sourceFingerprint!==sourceFingerprint) return { definition,status:'stale',reason:'数据源身份或实际目标已变化。' };
       for (const dependency of definition.dependencies) {
@@ -123,7 +124,7 @@ export class SemanticCatalog {
         return existing.definitionIds.map(id=>this.store.get('definitions',id));
       }
       const versions=this.store.definitions(view.context.projectPath,view.context.dataSourceId);
-      if (versions.length+input.document.entries.length>128) throw new Error('首版每数据源最多保存 128 个语义版本（含历史）。');
+      if (versions.filter(item=>!item.archivedAt).length+input.document.entries.length>128) throw new Error('每数据源最多保存 128 个未归档语义版本，请在管理中归档不再使用的资料。');
       const definitions=input.document.entries.map(entry=>{
         const previous=versions.filter(item=>item.key===entry.key).sort((a,b)=>b.version-a.version)[0];
         if ((previous?.version ?? 0)!==entry.expectedVersion) throw new Error(`定义 ${entry.key} 已变化，请读取最新版本再更新。`);

@@ -2,7 +2,7 @@ import { setTimeout } from 'node:timers/promises';
 import type { ClientConfig } from 'pg';
 import { z } from 'zod';
 import type { BranchOperation } from '../shared/models.ts';
-import type { NeonBinding, NeonRemoval, NeonSource } from '../shared/neon-models.ts';
+import { localNeonEndpoint, type NeonBinding, type NeonRemoval, type NeonSource } from '../shared/neon-models.ts';
 import { PostgresProvider, secret } from './postgres.ts';
 
 const id = z.string().regex(/^[a-z0-9-]{1,60}$/);
@@ -14,6 +14,7 @@ const branchSchema = z.object({
 const endpointSchema = z.object({
   id, project_id: id, branch_id: id, host: z.string().min(1),
   type: z.enum(['read_only', 'read_write']), disabled: z.boolean().optional(),
+  port: z.number().int().min(1).max(65535).optional(),
 });
 const operationSchema = z.object({ id: z.string().min(1), project_id: id, branch_id: id.optional(), status: z.string() });
 type Branch = z.infer<typeof branchSchema>;
@@ -29,8 +30,9 @@ function responseData<T>(schema: z.ZodType<T>, value: unknown): T {
 
 export class NeonRequestError extends Error {
   readonly status: number;
-  constructor(status: number) {
-    super(`Neon API 请求失败（${status}）。请核对 API key、项目权限、分支额度和网络。`);
+  constructor(status: number, local = false) {
+    super(local ? `Local Neon API request failed (${status}). Check stellane-neon status and this instance’s controller.log.`
+      : `Neon API 请求失败（${status}）。请核对 API key、项目权限、分支额度和网络。`);
     this.status = status;
   }
 }
@@ -43,10 +45,11 @@ export class NeonProvider {
   constructor(fetcher: typeof fetch = globalThis.fetch) { this.fetcher = fetcher; }
 
   private async request(source: NeonSource, method: string, path: string, signal: AbortSignal, body?: unknown): Promise<unknown> {
+    const base = source.localEndpoint ? localNeonEndpoint.parse(source.localEndpoint) : 'https://console.neon.tech';
     const apiKey = await secret(source.apiKeyRef);
     let response: Response;
     try {
-      response = await this.fetcher(`https://console.neon.tech/api/v2/projects/${encodeURIComponent(source.projectId)}${path}`, {
+      response = await this.fetcher(`${base}/api/v2/projects/${encodeURIComponent(source.projectId)}${path}`, {
         method, signal: AbortSignal.any([signal, AbortSignal.timeout(20000)]), redirect: 'error',
         headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -54,7 +57,7 @@ export class NeonProvider {
     } catch {
       throw new Error('Neon 请求未确认。请核对原操作；创建和写入不会自动重放。');
     }
-    if (!response.ok) { await response.body?.cancel(); throw new NeonRequestError(response.status); }
+    if (!response.ok) { await response.body?.cancel(); throw new NeonRequestError(response.status, !!source.localEndpoint); }
     if (response.status === 204) return {};
     const chunks: Uint8Array[] = []; let size = 0;
     const reader = response.body?.getReader();
@@ -91,6 +94,7 @@ export class NeonProvider {
   private assertIdentity(source: NeonSource, binding: NeonBinding, observed: Observed): void {
     const branch = observed.branch;
     if (binding.providerId !== source.id || binding.projectId !== source.projectId || branch.id !== binding.branchId
+      || !!binding.local !== !!source.localEndpoint
       || branch.created_at !== binding.createdAt || branch.parent_id !== binding.parentId
       || branch.parent_lsn !== binding.parentLsn || branch.last_reset_at !== binding.lastResetAt
       || (binding.managed && observed.annotation?.[operationOwner] !== binding.operationId)) {
@@ -111,6 +115,7 @@ export class NeonProvider {
     return { providerId: source.id, projectId: source.projectId, branchId: branch.id, endpointId: endpoint.id,
       createdAt: branch.created_at, parentId: branch.parent_id, parentLsn: branch.parent_lsn,
       lastResetAt: branch.last_reset_at, managed, checkpoint,
+      ...(source.localEndpoint ? { local: true as const } : {}),
       ...(managed ? { operationId: observed.annotation?.[operationOwner] } : {}) };
   }
   async sourceBinding(source: NeonSource, signal: AbortSignal, expectedHost?: string): Promise<NeonBinding> {
@@ -120,7 +125,8 @@ export class NeonProvider {
     const endpoint = expectedHost ? endpoints.find(item => item.host === expectedHost && !item.disabled)
       : endpoints.find(item => item.type === 'read_write' && !item.disabled) ?? endpoints.find(item => !item.disabled);
     if (expectedHost && !endpoint) throw new Error('连接地址与 Neon 项目或分支不一致，请从同一个分支复制连接信息。');
-    if (!endpoint) throw new Error('此 Neon 来源没有可用 compute，请先在 Neon Console 启用连接。');
+    if (!endpoint) throw new Error(source.localEndpoint ? 'Local Neon has no active compute. Check stellane-neon status.'
+      : '此 Neon 来源没有可用 compute，请先在 Neon Console 启用连接。');
     return this.binding(source, observed, endpoint, false, false);
   }
   private async usableEndpoint(source: NeonSource, binding: NeonBinding, signal: AbortSignal): Promise<Endpoint> {
@@ -145,12 +151,15 @@ export class NeonProvider {
     try { url = new URL(uri); database = decodeURIComponent(url.pathname.slice(1));
       user = decodeURIComponent(url.username); password = decodeURIComponent(url.password);
     } catch { throw new Error('Neon 返回了无效连接。'); }
+    const local = !!source.localEndpoint;
+    const port = local ? endpoint.port : 5432;
+    if (local && (!['127.0.0.1', '[::1]'].includes(endpoint.host) || !port)) throw new Error('Local Neon returned a non-loopback SQL endpoint.');
     if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.hostname !== endpoint.host
       || database !== source.database || user !== source.user
-      || !password || (url.port && url.port !== '5432')) throw new Error('Neon SQL 连接与已验证的分支不匹配。');
+      || !password || Number(url.port || 5432) !== port) throw new Error('Neon SQL 连接与已验证的分支不匹配。');
     // Construct options explicitly. A URI sslmode must never override certificate verification.
-    return { host: url.hostname, port: 5432, database: source.database, user: source.user,
-      password, ssl: { rejectUnauthorized: true }, enableChannelBinding: true,
+    return { host: url.hostname === '[::1]' ? '::1' : url.hostname, port, database: source.database, user: source.user,
+      password, ssl: local ? false : { rejectUnauthorized: true }, enableChannelBinding: !local,
       connectionTimeoutMillis: 15000 };
   }
   private async waitOperations(source: NeonSource, operationIds: string[], signal: AbortSignal): Promise<void> {
@@ -186,7 +195,7 @@ export class NeonProvider {
       // Authentication, authorization and input rejection did not admit a branch.
       // Network errors and server/locking/conflict responses remain uncertain.
       if (error instanceof NeonRequestError && [400, 401, 403, 404, 422].includes(error.status)) {
-        throw new NeonCreationRejectedError(error.status);
+        throw new NeonCreationRejectedError(error.status, !!source.localEndpoint);
       }
       throw error;
     }

@@ -6,7 +6,7 @@ Stellane 是 DeepSeek Harness 的数据插件。用户在普通对话里提问�
 
 多条试验路径是 Stellane 的核心思路：从共同基线出发，让不同假设分别展开，再依据结果决定下一步。侧边面板展示来源、记忆、SQL、试验进度和保留的结果。
 
-[English](README.md) · [跟着演示上手](examples/README.zh-CN.md) · [分支试验教程](docs/experiments.zh-CN.md) · [产品设计](PRODUCT.md) · [开发与验收](DEVELOPMENT.md)
+[English](README.md) · [跟着演示上手](examples/README.zh-CN.md) · [分支试验教程](docs/experiments.zh-CN.md) · [产品设计](PRODUCT.md) · [开发与验收](DEVELOPMENT.md) · [安装、升级和卸载](docs/install-and-maintain.zh-CN.md) · [数据与隐私](docs/data-and-privacy.zh-CN.md)
 
 ## 什么场景有帮助
 
@@ -51,17 +51,32 @@ flowchart LR
 | 接入方式 | 查数据、看血缘、保存与复核记忆 | 独立写入试验 |
 | --- | --- | --- |
 | PostgreSQL | 支持 | 需分支提供方 |
-| Neon 连接 URL | 支持 | 补充 Neon API 访问后启用 |
-| Neon + API | 支持 | 实验性支持，云端验收待完成 |
+| Neon 连接 URL | 支持 | 仅有 URL 不提供分支管理 |
+| Docker 自托管开源 Neon | 支持 | [实验性本地控制器](docs/local-neon.zh-CN.md)，完整运行验收待完成 |
+| Neon 云 API | 支持 | 实验性适配，不属于本次云端验收范围 |
 | Stello | 支持 | 支持 |
 
 **普通 PostgreSQL 就可以开始用。** 分析和记忆无需 Docker、Stello 或 Neon API key。需要隔离修改数据或结构时再使用分支，纯只读问题可以直接查询来源库。
 
-Stellane 使用提供方的数据库分支能力。Stello 提供固定数据切面；Neon 的基线和结果是由 Stellane 限制为只读的分支，外部管理员仍可能修改它们。保留 Neon 结果可能需要同时保留父分支，面板会说明原因，这些资源仍可能产生云端费用。分支启动时间和资源开销取决于提供方与实际负载。
+Stellane 使用提供方的数据库分支能力。Stello 提供固定数据切面；Neon 的基线和结果是由 Stellane 限制为只读的分支，外部管理员仍可能修改它们。保留 Neon 结果可能需要同时保留父分支，面板会说明原因。本地 Docker 时间线占用磁盘，云端账户则可能继续计费；Neon 采用不依赖付费云账户的自托管路线，目前完整运行验收尚未通过。分支启动时间和资源开销取决于提供方与实际负载。
 
 ## 安装
 
-当前为开发版本，从源码安装。需要 Node.js **24.9+**、通过 Corepack 使用 pnpm **11.1.2**，以及已能正常对话的 DeepSeek Harness **0.2.2-rc.1**。面板目前适配 Harness Web。
+当前版本为 **0.3.0-preview.1**。需要 Node.js **24.9+**、已能正常聊天的 DSH **0.2.2-rc.1 至 rc.3**，面板面向 Harness Web。预览安装包包含构建产物，使用者不需要先下载源码或安装编译器。
+
+将收到的预览 `.tgz` 安装包路径替换为本机真实绝对路径：
+
+```sh
+dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
+```
+
+然后重启同一个 Web Host，从侧栏打开 Stellane。终端启动的 Host 停止后可重新运行 `dsh web`；远端使用 `dsh web --no-open` 和原有访问方式。这里不假定预览包已经发布到 npm。
+
+界面支持中文和英文，可在面板切换。状态目录、升级备份和卸载步骤见[安装与维护指南](docs/install-and-maintain.zh-CN.md)。当前真实运行验收环境为 Linux，其他操作系统仍需各自完成端到端验证。
+
+### 从源码开发
+
+开发者另需通过 Corepack 使用 pnpm 11.1.2：
 
 ```sh
 git clone https://github.com/czNail/Stellane.git
@@ -71,13 +86,7 @@ corepack pnpm check
 dsh plugin --profile web add "$PWD"
 ```
 
-安装后重启对应的 Harness Web Host。若平时在终端启动，停止原进程后执行：
-
-```sh
-dsh web
-```
-
-Harness 会打开浏览器并打印访问地址。远端 Host 可用 `dsh web --no-open`，沿用你已有的访问方式。插件安装与启动须使用同一 profile。
+源码改动后重新构建并重启对应 Host。更多开发和发布检查见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 没有自己的数据，也可以先体验
 
@@ -86,13 +95,13 @@ Harness 会打开浏览器并打印访问地址。远端 Host 可用 `dsh web --
 启动 Docker 后执行：
 
 ```sh
-corepack pnpm demo start
-corepack pnpm demo status
+dsh plugin --profile web exec stellane-demo start
+dsh plugin --profile web exec stellane-demo status
 ```
 
 按命令输出的项目目录和私有连接文件说明接入，再跟着[演示步骤](examples/README.zh-CN.md)操作。本地 Postgres 演示覆盖分析和记忆；分支部分还需要配置 Neon 或 Stello 测试来源，本地启动命令不会创建云项目。
 
-结束时执行 `corepack pnpm demo stop`。重置、变更数据和接入分支提供方的方法见演示指南。脚本只管理带自身所属标记的演示资源。
+结束时执行 `dsh plugin --profile web exec stellane-demo stop`。在源码目录中，对应命令仍是 `pnpm demo start`、`status` 和 `stop`。重置、变更数据和接入分支提供方的方法见演示指南。脚本只管理带自身所属标记的演示资源。
 
 ## 接一次库，之后直接聊天
 
@@ -111,7 +120,7 @@ corepack pnpm demo status
 
 有多个可能匹配的数据源时，在问题里说明使用哪一个。只有业务术语需要约定口径时，才需要去 **数据目录** 补充业务说明。
 
-为 Neon 数据源勾选 **启用独立试验**，补充项目 ID、分支 ID 和 API key；使用 Stello 时提供导出的客户端配置和来源分支。之后可以请求单次试验，也可以从共享基线开展不同名称的试验。[分支教程](docs/experiments.zh-CN.md)解释具体步骤和提供方差异。
+本地 Neon 试验按[本地 Neon 指南](docs/local-neon.zh-CN.md)启动 Docker 自托管服务；安装包包含启动命令，再使用打印的本地控制器配置接入。云 API 是另一个实验性入口；使用 Stello 时提供导出的客户端配置和来源分支。之后可以请求单次试验，也可以从共享基线开展不同名称的试验。[分支教程](docs/experiments.zh-CN.md)解释具体步骤和提供方差异。
 
 ## 面板什么时候用
 
@@ -119,6 +128,7 @@ corepack pnpm demo status
 - **数据目录**：看表、字段、业务说明、关系与血缘，包括旧关系为何失效。
 - **探索**：需要时手写 SQL，或把对话绑定到指定环境。
 - **数据源**：接入数据库，查看连接及可用能力。
+- **管理与清理**：停用访问、更新凭据、归档记忆、回收保留分支，以及删除本地资料。
 
 日常分析可以一直留在聊天里。
 
@@ -130,4 +140,6 @@ corepack pnpm demo status
 
 来源连接在 Stellane 中只读，写入仅发生在插件创建的试验分支。状态与证据保存在单个 Harness Host，当前未提供分布式部署、通用多 Agent 调度和自动生产采纳。
 
-PostgreSQL 和 Stello 有真实数据库集成测试。Neon 分支适配目前为实验性功能，API 契约测试已通过，尚未完成真实云端验收；已提供 `test:neon:live`，可用专用 Neon 测试项目验证。具体步骤和覆盖范围见[开发与验收](DEVELOPMENT.md#检查与验收)。演示结果说明合成样例中的行为，不代表生产场景固定的准确率或性能收益。
+PostgreSQL 和 Stello 有真实数据库集成测试。Neon 云端执行不在本次预览验收范围，API 契约测试不等于云端验收。Docker 自托管路线使用真实开源 Neon 服务和 Stellane 本地开发控制器，不依赖付费云账户。具体步骤和覆盖范围见[开发与验收](DEVELOPMENT.md#检查与验收)。演示结果说明合成样例中的行为，不代表生产场景固定的准确率或性能收益。
+
+本轮已验证与剩余发布检查见[发布状态](docs/release-status.zh-CN.md)。

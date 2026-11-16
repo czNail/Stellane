@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, unlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, lstat, mkdir, realpath, unlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { connectionInput, type ConnectionInput } from '../shared/models.ts';
 import { connectNeonInput, connectPostgresInput } from '../shared/onboarding-models.ts';
 import type { NeonInput } from '../shared/neon-models.ts';
@@ -48,7 +48,7 @@ export function parseConnectionUrl(value: string): ParsedConnection {
     channelBinding: channelBinding as ConnectionInput['channelBinding'] };
 }
 
-async function managedSecret(directory: string, value: string): Promise<{ reference: string; discard: () => Promise<void> }> {
+export async function managedSecret(directory: string, value: string): Promise<{ reference: string; discard: () => Promise<void> }> {
   if (Buffer.byteLength(value + '\n') > 8192) throw new Error('凭据过长，私有凭据文件最多支持 8 KiB。');
   const folder = join(directory, 'credentials');
   await mkdir(folder, { recursive: true, mode: 0o700 });
@@ -58,8 +58,21 @@ async function managedSecret(directory: string, value: string): Promise<{ refere
   return { reference: `file:${filename}`, discard: () => unlink(filename) };
 }
 
+// Only explicit ownership recorded at creation authorizes deletion. User-supplied
+// file/env references, including legacy references without ownership, are retained.
+export async function removeManagedSecret(directory: string, reference: string): Promise<void> {
+  if (!reference.startsWith('file:')) throw new Error('仅能清理插件自己创建的凭据文件。');
+  const filename = reference.slice(5);
+  const folder = resolve(directory, 'credentials');
+  if (dirname(filename) !== folder || !/^[a-f0-9-]{36}$/.test(basename(filename))) throw new Error('凭据不在插件私有目录内，未删除文件。');
+  const info = await lstat(filename).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+  if (!info) return;
+  if (!info.isFile() || info.isSymbolicLink() || await realpath(dirname(filename)) !== folder) throw new Error('凭据文件身份已变化，未删除文件。');
+  await unlink(filename);
+}
+
 export async function preparePostgresConnection(directory: string, value: unknown): Promise<{
-  connection: ConnectionInput; discard: () => Promise<void>;
+  connection: ConnectionInput; discard: () => Promise<void>; managedCredentialRef?: string;
 }> {
   const input = connectPostgresInput.parse(value);
   if (!('connectionString' in input)) return { connection: input, discard: async () => {} };
@@ -67,11 +80,11 @@ export async function preparePostgresConnection(directory: string, value: unknow
   // Validate all public fields before creating a credential file.
   const connection = connectionInput.parse({ name: input.name, projectPath: input.projectPath, ...parsed, passwordRef: 'env:STELLANE_PENDING' });
   const credential = await managedSecret(directory, password);
-  return { connection: { ...connection, passwordRef: credential.reference }, discard: credential.discard };
+  return { connection: { ...connection, passwordRef: credential.reference }, discard: credential.discard, managedCredentialRef: credential.reference };
 }
 
 export async function prepareNeonConnection(directory: string, value: unknown): Promise<{
-  source: NeonInput; expectedHost: string; discard: () => Promise<void>;
+  source: NeonInput; expectedHost: string; discard: () => Promise<void>; managedCredentialRef: string;
 }> {
   const input = connectNeonInput.parse(value);
   const parsed = parseConnectionUrl(input.connectionString);
@@ -82,6 +95,6 @@ export async function prepareNeonConnection(directory: string, value: unknown): 
   return {
     source: { name: input.name, projectPath: input.projectPath, projectId: input.projectId, branchId: input.branchId,
       database: parsed.database, user: parsed.user, apiKeyRef: credential.reference },
-    expectedHost: parsed.host.replace(/-pooler(?=\.)/, ''), discard: credential.discard,
+    expectedHost: parsed.host.replace(/-pooler(?=\.)/, ''), discard: credential.discard, managedCredentialRef: credential.reference,
   };
 }

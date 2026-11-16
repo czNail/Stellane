@@ -98,7 +98,7 @@ test('unfinished runs become interrupted after restart and are never replayed', 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('Stello busy after admission observes the original ticket without replaying creation', async () => {
+for (const response of ['busy', 'result_unknown'] as const) test(`Stello ${response} after admission observes the original ticket without replaying creation`, async () => {
   const id = randomUUID();
   const providerId = randomUUID();
   const parentIdentity = { service: 'test-service', slot: 0, incarnation: 1 };
@@ -118,7 +118,9 @@ test('Stello busy after admission observes the original ticket without replaying
       if (body.action === 'prepare_resource') return {
         identity: childIdentity, database: parentIdentity, parent_identity: parentIdentity, source_history: 'history',
       };
-      if (body.action === 'branch_create') throw new StelloRequestError(409, 'branch_rejected', 'resource lifecycle busy; retry');
+      if (body.action === 'branch_create') throw response === 'busy'
+        ? new StelloRequestError(409, 'branch_rejected', 'resource lifecycle busy; retry')
+        : new StelloRequestError(504, 'result_unknown');
       assert.equal(body.action, 'branch_get');
       if (body.name === encodeResource(parent.resource)) return {
         name: body.name, identity: parentIdentity, resource_id: 'parent', mode: 'writable', fork_lsn: '0/1', complete: true, state: 'ready',
@@ -135,6 +137,32 @@ test('Stello busy after admission observes the original ticket without replaying
   assert.equal(result.forkLsn, '0/A');
   assert.equal(actions.filter(action => action === 'branch_create').length, 1);
   assert(actions.every(action => ['branch_get', 'prepare_resource', 'branch_create'].includes(action)));
+});
+
+test('an admitted Stello delete is observed through a late rejection without replaying or changing its identity', async () => {
+  const id = randomUUID(); const providerId = randomUUID();
+  const identity = { service: 'test-service', slot: 1, incarnation: 1 };
+  const source = { id: providerId, name: 'test', projectPath: '/test', configPath: '/unused', resource: 'test/main', createdAt: new Date().toISOString() };
+  const binding = { providerId, resource: 'test/work', resourceId: 'work', identity, forkLsn: '0/1', managed: true };
+  const actions: string[] = []; let admitted = false; let observed = 0; let persisted = false;
+  class RemovalProvider extends StelloProvider {
+    override async operation(_source: StelloSource, body: Record<string, unknown>): Promise<unknown> {
+      actions.push(String(body.action));
+      if (body.action === 'branch_change') {
+        assert(persisted); assert.equal(body.operation_id, id.replaceAll('-', ''));
+        assert.deepEqual(body.identity, identity); admitted = true;
+        throw new StelloRequestError(409, 'branch_rejected', 'resource lifecycle busy; retry');
+      }
+      assert.equal(body.action, 'branch_get');
+      const complete = !admitted || observed++ > 0;
+      return { identity, resource_id: 'work', revision: admitted ? 2 : 1,
+        state: admitted ? complete ? 'deleted' : 'deleting' : 'ready', complete,
+        operation_id: admitted ? id.replaceAll('-', '') : undefined };
+    }
+  }
+  await new RemovalProvider().remove(source, binding, id, undefined, () => { persisted = true; }, AbortSignal.timeout(5000));
+  assert.equal(actions.filter(action => action === 'branch_change').length, 1);
+  assert.equal(actions.filter(action => action === 'branch_get').length, 3);
 });
 
 test('experiment recovers its original resources, scopes its conversation and preserves fixed evidence after cleanup', async () => {
@@ -313,12 +341,13 @@ test('metric evidence retains full totals on ambiguous attribution and fences re
       }] };
     },
   };
-  const core = new StellaneCore(directory, metricsProvider);
+  let core = new StellaneCore(directory, metricsProvider);
   try {
     const original = core.createEnvironment({ connectionId: (await core.saveConnection(input(source))).id, name: 'events' });
     const sibling = core.createEnvironment({ connectionId: (await core.saveConnection(input(source))).id, name: 'sibling' });
     const id = randomUUID();
     const sourceRunId = randomUUID();
+    await core.close();
     const store = new Store(directory);
     try {
       store.put('knowledge', { id, environmentId: original.id, key: 'relation', version: 1, dependencyFingerprint: 'demo',
@@ -328,6 +357,7 @@ test('metric evidence retains full totals on ambiguous attribution and fences re
         evidence: { runId: sourceRunId, contextId: randomUUID(), observedAt: new Date().toISOString(), method: 'join-profile', snapshot: '39:39:' },
       });
     } finally { store.close(); }
+    core = new StellaneCore(directory, metricsProvider);
     const agent: Actor = { kind: 'agent', id: 'metric-agent', projectPath: source };
     const spec = { environmentId: original.id, relationshipIds: [id], groupColumn: 'area', name: '区域告警',
       filter: { column: 'kind', value: 'alert' } };

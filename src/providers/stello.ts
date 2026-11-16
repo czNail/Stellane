@@ -43,6 +43,9 @@ export class StelloRequestError extends Error {
 function isBusy(error: unknown): boolean {
   return error instanceof StelloRequestError && error.status === 409 && String(error.cause).includes('busy');
 }
+function canObserveAfter(error: unknown): boolean {
+  return isBusy(error) || error instanceof StelloRequestError && error.status === 504 && error.code === 'result_unknown';
+}
 
 export class StelloProvider {
   readonly sql = new PostgresProvider();
@@ -101,6 +104,7 @@ export class StelloProvider {
     if (!connection.password && (!connection.certificate || !connection.key)) throw new Error('Stello 未返回完整 SQL 凭据。');
     return { host: connection.host, port: connection.port, database: connection.database, user: connection.user,
       password: connection.password,
+      connectionTimeoutMillis: 15000,
       ssl: { ca: connection.ca, cert: connection.certificate, key: connection.key, rejectUnauthorized: true } };
   }
   async create(source: StelloSource, parent: BranchBinding, operation: BranchOperation,
@@ -152,16 +156,16 @@ export class StelloProvider {
   private async submitCreation(source: StelloSource, operation: BranchOperation, body: Record<string, unknown>, signal: AbortSignal): Promise<BranchBinding> {
     try { await this.operation(source, body, signal); }
     catch (error) {
-      // A busy reply can follow durable admission. Observe this exact ticket;
+      // Busy or result_unknown can follow durable admission. Observe this exact ticket;
       // never send a second create request or choose a replacement resource.
-      if (!isBusy(error)) throw error;
+      if (!canObserveAfter(error)) throw error;
     }
     const deadline = Date.now() + 120000;
     while (true) {
       let binding: BranchBinding | undefined;
       try { binding = await this.reconcile(source, operation, signal); }
       catch (error) {
-        if (!isBusy(error)) throw error;
+        if (!canObserveAfter(error) && !(error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found')) throw error;
       }
       if (binding) return binding;
       if (Date.now() > deadline) throw new Error('Stello 派生仍未完成，请保留原操作并核对状态。');
@@ -209,13 +213,23 @@ export class StelloProvider {
     }
     if (!saved) { persist(removal); saved = removal; }
     const { id: _id, ...request } = removal;
+    const observeDeletion = async (status: Awaited<ReturnType<typeof inspect>>, failure?: unknown) => {
+      const deadline = Date.now() + 60000;
+      while (status && !(status.state === 'deleted' && status.complete)) {
+        // A rejected/late response can follow admission of the original delete.
+        // Observe only that operation; never resubmit or adopt a different one.
+        if (status.operation_id !== removal.operation_id || status.complete || Date.now() >= deadline) {
+          throw failure ?? new Error('清理尚未完成，请继续核对原操作。');
+        }
+        await setTimeout(500, undefined, { signal });
+        status = await inspect();
+      }
+    };
     try { await this.operation(source, { action: 'branch_change', operation: 'delete', ...request }, signal); }
     catch (error) {
       const observed = await inspect().catch(() => { throw error; });
-      if (!observed || (observed.state === 'deleted' && observed.complete)) return;
-      throw error;
+      return observeDeletion(observed, error);
     }
-    const after = await inspect();
-    if (after && !(after.state === 'deleted' && after.complete)) throw new Error('清理尚未完成，请继续核对原操作。');
+    await observeDeletion(await inspect());
   }
 }

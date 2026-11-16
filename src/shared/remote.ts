@@ -8,13 +8,17 @@ import type { CatalogView, ContextResult, SemanticDefinition } from './context-m
 import { metricInput } from './metric-models.ts';
 import { connectPostgresInput, connectNeonInput } from './onboarding-models.ts';
 import { neonInput } from './neon-models.ts';
+import { managementInput, type ManagementView } from './management-models.ts';
 
 export const PACKAGE = '@stellane/harness-plugin';
 export const requestSchemas = {
+  management: z.strictObject({}),
+  manage: managementInput,
   snapshot: z.strictObject({}),
   saveConnection: connectionInput,
   connectPostgres: connectPostgresInput,
   connectNeon: connectNeonInput,
+  connectLocalNeon: z.strictObject({ configPath: z.string().min(1).max(1024), projectPath: z.string().min(1).max(1024).optional(), name: z.string().min(1).max(80).optional() }),
   saveNeon: neonInput,
   probe: z.strictObject({ connectionId: z.string().uuid() }),
   createEnvironment: environmentInput,
@@ -37,8 +41,9 @@ export const requestSchemas = {
 export type Operation = keyof typeof requestSchemas;
 export type Requests = { [K in Operation]: z.input<(typeof requestSchemas)[K]> };
 export interface Responses {
+  management: ManagementView; manage: ManagementView;
   snapshot: Snapshot; saveConnection: Connection; probe: DatabaseTarget;
-  connectPostgres: Environment; connectNeon: Environment; saveNeon: Environment;
+  connectPostgres: Environment; connectNeon: Environment; connectLocalNeon: Environment; saveNeon: Environment;
   createEnvironment: Environment; query: Run;
   metric: Run; runEvidence: Run;
   prepareConversation: { workspaceId: string; sessionId?: string };

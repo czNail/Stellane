@@ -83,7 +83,7 @@ Current support covers multiple independently tracked experiments. There is no g
 
 The repository includes a deterministic runner. It calls the same Core used by the plugin, applies the published proposal SQL and checks the independent expected answers. It tests branch behavior; it does **not** demonstrate an Agent discovering the proposals on its own.
 
-For a dedicated Neon test project, load the files using a database role allowed to create the demo schemas. Keep connection credentials in your usual `PGSERVICEFILE`, `PGPASSFILE` or Neon client configuration:
+For a dedicated [local Docker Neon source](local-neon.md), or an existing test source, load the files using a database role allowed to create the demo schemas. Keep connection credentials in your usual `PGSERVICEFILE`, `PGPASSFILE` or Neon client configuration:
 
 ```sh
 psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/telemetry/setup.sql
@@ -96,7 +96,7 @@ Use the provider configuration format in [DEVELOPMENT.md](../DEVELOPMENT.md). Th
 
 ```sh
 corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset telemetry
-# Or a dedicated Neon source with API access:
+# Or a local Docker Neon source using its generated provider.json:
 corepack pnpm demo:branches --neon /absolute/path/neon-source.json --dataset telemetry
 ```
 
@@ -116,7 +116,7 @@ corepack pnpm demo:branches status --state-dir /absolute/path/printed-run-direct
 
 ## Retention, cleanup and interrupted runs
 
-Successful runs retain two result branches and the shared baseline for inspection. Stello closes and removes temporary work branches. Neon can require the work branches as ancestors of retained results; Stellane removes their computes and closes local access while reporting the retained storage. Cloud resources can still incur charges.
+Successful runs retain two result branches and the shared baseline for inspection. Stello closes and removes temporary work branches. Neon can require the work branches as ancestors of retained results; Stellane removes their computes and closes local access while reporting the retained storage. Local Docker timelines still occupy disk; cloud resources can incur charges. For chat-created experiments, use **Management → Retained branches** to remove unwanted results and then their unneeded parents. **Finish experiment** does not delete every retained result.
 
 When finished inspecting a successful scripted run, remove only its recorded branches:
 
@@ -134,6 +134,6 @@ corepack pnpm demo:branches reconcile --state-dir /absolute/path/printed-run-dir
 
 This observes the original operations; it does not create branches or replay SQL. `reviewed` means the outcomes are known and explicit `cleanup` is available. It does **not** mean the incomplete demo passed. The report preserves the original failure and observed resource identities; the Core records preserve the interrupted task history. If an outcome remains unknown, leave that state intact and inspect the provider before another run. A missing write receipt remains unknown, rather than being treated as permission to repeat the statement.
 
-After a process crash, `runner.lock` may remain. Verify that its recorded process has exited before removing only that lock and running `reconcile`. Do not delete the state directory to make a failed run disappear.
+After a process crash, `runner.lock` may remain. Verify that its recorded process has exited before removing only that lock and running `reconcile`. This runner lock is separate from Core’s `owner.sqlite`: never delete `owner.sqlite` to bypass an active owner. Do not delete the state directory to make a failed run disappear.
 
-Stello snapshots have a fixed-state guarantee. Neon baseline and result branches are read-only through Stellane but can be changed by external administrators; their historical observations require revalidation. Neon API contract tests are available, and real cloud validation remains opt-in and unverified without account credentials. The runner reports what it actually observed rather than promising permanent immutability or zero resource cost.
+Stello snapshots have a fixed-state guarantee. Neon baseline and result branches are read-only through Stellane but can be changed by external administrators; their historical observations require revalidation. Neon contract tests and real local-provider tests are separate checks. The Docker route does not need a paid cloud account; cloud validation is outside this preview. The runner reports what it actually observed rather than promising permanent immutability or zero resource cost.

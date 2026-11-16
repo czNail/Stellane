@@ -1,0 +1,21 @@
+name: Use case or feature / 场景与功能建议
+description: Explain a problem Stellane could solve / 描述需要解决的问题
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Situation and user goal / 场景与目标
+      description: What decision or investigation is difficult today? Use generic or synthetic examples.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Useful outcome / 怎样才算有用
+      description: What evidence or interaction would make the task easier? Is PostgreSQL alone enough, or are isolated changes needed?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround / 现有做法

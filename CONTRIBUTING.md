@@ -4,7 +4,7 @@ Stellane is a DeepSeek Harness plugin for understanding PostgreSQL data and expl
 
 ## Run locally
 
-Use Node.js 24.9+, pnpm 11.1.2 and DSH 0.2.2-rc.1.
+Use Node.js 24.9+, pnpm 11.1.2 and DSH Web 0.2.2-rc.1–rc.3 (development dependencies use rc.3).
 
 ```sh
 corepack pnpm install
@@ -27,7 +27,7 @@ Neon API contract tests do not require cloud credentials:
 corepack pnpm test:neon
 ```
 
-For an opt-in cloud run, prepare a dedicated Neon test source JSON and run `STELLANE_NEON_CONFIG=/absolute/path/to/neon-test.json corepack pnpm test:neon:live`. Without the variable, the test explicitly skips. It creates billable test branches, preserves state on failure, and removes its exact resources after a successful run. See the test-source format and recovery instructions in [DEVELOPMENT.md](DEVELOPMENT.md).
+For real Neon development without cloud charges, use [the Docker setup](docs/local-neon.md). It runs actual open-source services with a Stellane local controller; contract checks, live local-provider checks and DSH chat demonstrations are separate evidence. Cloud API support is experimental and is not required to contribute or validate this preview.
 
 Stello integration tests need a separate test instance and copied build artifacts. Never run the test fixture against someone else's active Stello deployment or build in a shared checkout. Setup and validation details are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
@@ -64,6 +64,8 @@ Use replaceable schemas and business examples in tests. A feature should work be
 
 ## Before opening a change
 
-Describe the user problem, resulting behavior and validation. Include screenshots for interaction changes. Distinguish simulated API tests, real PostgreSQL tests and cloud-account validation. Keep the English and Chinese quick starts aligned when the user path changes.
+Describe the user problem, resulting behavior and validation. Include screenshots for interaction changes. Distinguish simulated API tests, actual PostgreSQL/local Neon/Stello runs and model-driven chat acceptance. Do not call a local controller the official Neon cloud API. Keep the English and Chinese quick starts aligned when the user path changes.
 
-Run `corepack pnpm check` plus the integration tests relevant to the change. Do not claim an unrun provider test passed. If an API or database fails during a test, preserve enough evidence to explain the failure without publishing credentials.
+Run `corepack pnpm check` plus the integration tests relevant to the change. For release/distribution changes, run `corepack pnpm test:package`: it installs the built archive into a fresh directory with no source checkout. CI checks Node 24.9.0 and current 24.x on Ubuntu, plus a real PostgreSQL fixture and the archive. Keep maintenance/privacy guidance aligned with new persistence or deletion behavior. Do not claim an unrun provider test passed. If an API or database fails during a test, preserve enough evidence to explain the failure without publishing credentials.
+
+Use the issue templates with a minimal synthetic reproduction. Read [SECURITY.md](SECURITY.md) before reporting a suspected vulnerability. Never post state databases, backup files, full chats or credentials publicly.

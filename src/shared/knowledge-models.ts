@@ -46,11 +46,12 @@ export interface ProfiledKnowledge {
   fact: ProfiledFact;
   evidence: KnowledgeEvidence;
   dependencyFingerprint: string;
+  archivedAt?: string;
   invalidation?: { reason: string; evidence: KnowledgeEvidence; unmatchedRows?: string; scope?: string };
 }
 
 export type KnowledgeItem = { id: string; fact: ViewLineage; evidence: KnowledgeEvidence; status: 'declared' }
-  | { id: string; version: number; fact: ProfiledFact; evidence: KnowledgeEvidence; status: 'observed' | 'stale' | 'superseded' | 'needs-check'; reason?: string;
+  | { id: string; version: number; fact: ProfiledFact; evidence: KnowledgeEvidence; status: 'observed' | 'stale' | 'superseded' | 'needs-check' | 'archived'; reason?: string;
     invalidation?: ProfiledKnowledge['invalidation'] };
 export type LearnResult = { accepted: true; knowledge: KnowledgeItem }
   | { accepted: false; reason: string; evidence: KnowledgeEvidence };
