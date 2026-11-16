@@ -1,0 +1,114 @@
+{
+  "name": "telemetry",
+  "schema": "stellane_demo_telemetry",
+  "summary": "Discover a two-hop relationship, retain an orphan event, and compare two plausible mapping repairs.",
+  "unit": "generic measurement units",
+  "tables": [
+    "zone_registry",
+    "device_inventory",
+    "event_log"
+  ],
+  "metricSql": "SELECT z.area AS group_name, count(*)::text AS records, sum(e.magnitude)::text AS total FROM stellane_demo_telemetry.event_log e LEFT JOIN stellane_demo_telemetry.device_inventory d ON e.device_hint=d.device_token LEFT JOIN stellane_demo_telemetry.zone_registry z ON d.zone_ref=z.zone_key WHERE e.state='active' GROUP BY z.area ORDER BY z.area NULLS LAST",
+  "fingerprintSql": "SELECT md5(jsonb_build_object('zones',(SELECT jsonb_agg(to_jsonb(z) ORDER BY zone_key) FROM stellane_demo_telemetry.zone_registry z),'devices',(SELECT jsonb_agg(to_jsonb(d) ORDER BY device_token) FROM stellane_demo_telemetry.device_inventory d),'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY event_no) FROM stellane_demo_telemetry.event_log e))::text) AS fingerprint",
+  "claims": [
+    {
+      "kind": "join",
+      "from": {
+        "schema": "stellane_demo_telemetry",
+        "table": "event_log",
+        "columns": [
+          "device_hint"
+        ]
+      },
+      "to": {
+        "schema": "stellane_demo_telemetry",
+        "table": "device_inventory",
+        "columns": [
+          "device_token"
+        ]
+      }
+    },
+    {
+      "kind": "join",
+      "from": {
+        "schema": "stellane_demo_telemetry",
+        "table": "device_inventory",
+        "columns": [
+          "zone_ref"
+        ]
+      },
+      "to": {
+        "schema": "stellane_demo_telemetry",
+        "table": "zone_registry",
+        "columns": [
+          "zone_key"
+        ]
+      }
+    }
+  ],
+  "metric": {
+    "name": "Active events by area",
+    "groupColumn": "area",
+    "amountColumn": "magnitude",
+    "filter": {
+      "column": "state",
+      "value": "active"
+    }
+  },
+  "expected": {
+    "baseline": [
+      {
+        "group_name": "North",
+        "records": "4",
+        "total": "110"
+      },
+      {
+        "group_name": "South",
+        "records": "1",
+        "total": "40"
+      }
+    ],
+    "drift": [
+      {
+        "group_name": "North",
+        "records": "3",
+        "total": "90"
+      },
+      {
+        "group_name": "South",
+        "records": "1",
+        "total": "40"
+      },
+      {
+        "group_name": null,
+        "records": "1",
+        "total": "20"
+      }
+    ],
+    "variantA": [
+      {
+        "group_name": "North",
+        "records": "4",
+        "total": "110"
+      },
+      {
+        "group_name": "South",
+        "records": "1",
+        "total": "40"
+      }
+    ],
+    "variantB": [
+      {
+        "group_name": "North",
+        "records": "3",
+        "total": "90"
+      },
+      {
+        "group_name": "South",
+        "records": "2",
+        "total": "60"
+      }
+    ]
+  },
+  "interpretation": "Both repairs restore full coverage and preserve 5 events / 150 units. Coverage alone does not establish whether North or South is correct; choose only with external business evidence."
+}

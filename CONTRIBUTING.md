@@ -1,6 +1,6 @@
 # Contributing
 
-Stellane is a DeepSeek Harness plugin for working with PostgreSQL data in ordinary chat. Start with the [quick start](README.md) and [product decisions](PRODUCT.md).
+Stellane is a DeepSeek Harness plugin for understanding PostgreSQL data and exploring alternative changes in independent database branches. Start with the [quick start](README.md), [runnable demos](examples/README.md) and [product decisions](PRODUCT.md).
 
 ## Run locally
 
@@ -31,6 +31,20 @@ For an opt-in cloud run, prepare a dedicated Neon test source JSON and run `STEL
 
 Stello integration tests need a separate test instance and copied build artifacts. Never run the test fixture against someone else's active Stello deployment or build in a shared checkout. Setup and validation details are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
+## Keep the demos useful
+
+The [demo guide](examples/README.md) connects setup, ordinary chat prompts, deliberate data changes and expected outcomes. It is the first path for someone who does not have a suitable database. The [experiment walkthrough](docs/experiments.md) shows how to use one baseline for separate trial paths.
+
+When adding a scenario:
+
+- Use synthetic data and a replaceable schema. Do not put business-specific table names or repair rules into Core or the bundled Skill.
+- Include setup SQL, the controlled change, each proposed variant and independently computed expected outputs. State which assumptions are supplied by the user and which relationships the Agent should discover.
+- Explain the question and the benefit: what a plain answer could miss, what should be reused, or which changes need independent branches.
+- For A/B comparisons, verify the shared starting state, the same metric definition, source preservation and variant isolation. Cover cleanup or retained dependencies as well as the successful query.
+- Keep prompts free of answer spoilers. Expected-output files are for the person checking the demo; they should not be injected into the Agent's conversation as evidence.
+
+Demonstrations and regressions serve different readers. A demo should be easy to follow in DSH, while a regression checks a specific contract without depending on the model producing exact prose. Document which checks used an actual Agent, a real database or a simulated provider API.
+
 ## Where changes belong
 
 | Area | Location |
@@ -41,8 +55,10 @@ Stello integration tests need a separate test instance and copied build artifact
 | Harness tools, embedded Skill and integration | `src/host/` |
 | The inspection and management panel | `src/client/` |
 | Regressions and real-database tests | `tests/` |
+| Synthetic datasets, scenario prompts and expected outcomes | `examples/` |
+| Branch workflow and provider guidance | `docs/experiments.md` |
 
-Keep analysis, lineage and memory available on ordinary PostgreSQL. Gate branch operations by capabilities. Preserve provider-specific guarantees: a read-only Neon branch is not an immutable Stello snapshot. Unknown writes or branch creation must be reconciled against the original operation before any repeat action.
+Keep analysis, lineage and memory available on ordinary PostgreSQL. Make independent trial paths from a common baseline understandable and traceable. Gate branch operations by capabilities. Preserve provider-specific guarantees: a read-only Neon branch is not an immutable Stello snapshot. Unknown writes or branch creation must be reconciled against the original operation before any repeat action.
 
 Use replaceable schemas and business examples in tests. A feature should work because of table structure, claims and evidence, rather than special handling of demonstration table names.
 

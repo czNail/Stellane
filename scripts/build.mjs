@@ -9,6 +9,11 @@ await build({
   packages: 'external', sourcemap: true,
 });
 await build({
+  entryPoints: ['scripts/demo-branches.ts'], outfile: 'dist/demo-branches.js',
+  bundle: true, platform: 'node', format: 'esm', target: 'node24',
+  tsconfig: 'tsconfig.host.json', packages: 'external', sourcemap: true,
+});
+await build({
   entryPoints: ['src/client/index.tsx'], outfile: 'dist/client.js',
   bundle: true, platform: 'browser', format: 'cjs', target: 'es2022',
   tsconfig: 'tsconfig.client.json', jsx: 'automatic',

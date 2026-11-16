@@ -216,6 +216,63 @@ Agent 身份、调用 ID 和项目目录来自 Harness 执行上下文；Core �
 - Stello 派生已准入后返回忙碌时，只观察同一票据的完成状态，不发送第二次创建请求。
 - Neon 创建响应丢失时按原操作和资源核对，未找到不能证明创建未发生，不自动重发 POST。删除只针对身份匹配的插件资源，异步操作完成后才报告完成。
 
+## 演示数据与多路径验收
+
+面向使用者的完整演示见[中文步骤](examples/README.zh-CN.md) / [English walkthrough](examples/README.md)；共同基线、A/B 分支和资源收尾见[多路径试验指南](docs/experiments.zh-CN.md) / [English experiment guide](docs/experiments.md)。演示覆盖设备事件与服务工单两种合成场景，表结构与规则只存在于样例中。
+
+三个入口服务于不同的验证目的：
+
+| 入口 | 使用的资源 | 验证内容 |
+| --- | --- | --- |
+| `pnpm demo start` | 独立演示容器、只读连接和演示项目 | 在 DSH 普通对话中发现关系、复用记忆、观察失效与面板证据 |
+| `pnpm dev:db` 后运行 `pnpm test:demo` | 开发数据库中的测试专属 schema；不连接演示容器 | 公开 SQL、独立预期数值、Core 记忆与失效行为 |
+| `pnpm demo:branches` | 已配置的专用 Neon 或 Stello 来源 | 真实分支中的共同起点、方案隔离、保留结果与清理 |
+
+### 普通对话演练
+
+```sh
+corepack pnpm demo start
+corepack pnpm demo url
+corepack pnpm demo status
+```
+
+按输出接入私有连接 URL，并在输出的项目目录新建普通对话。跟随演示指南逐步提问；用 `pnpm demo drift telemetry` 或 `pnpm demo drift support` 制造受控变化，再到新对话验证旧关系是否被复核。`pnpm demo verify` 对照数据文件的独立预期，不替代观察 Agent 的工具调用和面板证据。
+
+`pnpm demo reset` 只重建演示 schema，`pnpm demo stop` 停止演示容器并保留数据。重新 `start` 可恢复原数据。这些命令与 `dev:db` 各自管理带所属标记的资源，不能混用两者的连接文件。
+
+### 数据与记忆回归
+
+```sh
+corepack pnpm dev:db
+corepack pnpm test:demo
+corepack pnpm dev:db stop
+```
+
+测试读取 `examples/datasets/` 下的初始化、受控变更、A/B 方案 SQL 和 `manifest.json`，检查两套数据的预期指标、视图血缘、跨对话与重启后的记忆检索，以及变更后的旧关系失效。测试只清理自己成功创建的 schema；若同名 schema 已存在则拒绝覆盖。
+
+此处用事务回滚分别核对 A/B SQL 的数值，不把它视为数据库分支隔离验收。`test:integration` 已包含这组测试，只有单独检查演示数据时才需要再运行 `test:demo`。
+
+### 真实分支对照
+
+先按多路径指南将合成数据装入专用来源并变更到 drift 状态，再运行构建后的脚本：
+
+```sh
+corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset telemetry
+# 或：
+corepack pnpm demo:branches --neon /absolute/path/neon-source.json --dataset support
+```
+
+验收时只保存一次共享基线，再从这个确切环境创建独立 A/B 分支。检查两项任务引用同一基线、A 的写入不改变 B、两份结果使用同一指标口径，并对照来源数据指纹确认来源未变。工单场景还比较容量约束，不能只因为关联覆盖完整就认定方案更好。脚本直接调用 Core 并使用已知方案 SQL，不能作为 Agent 自主发现或模型对话通过的证明；面板交互需另按普通对话步骤验收。
+
+成功运行会打印私有状态目录，保留报告、结果和共享基线。报告使用独立 Core 状态，不会自动进入现有 DSH 面板。检查后显式清理本次记录的资源：
+
+```sh
+corepack pnpm demo:branches status --state-dir /absolute/path/printed-run-directory
+corepack pnpm demo:branches cleanup --state-dir /absolute/path/printed-run-directory
+```
+
+清理按记录的真实身份处理分支，保留来源与本地证据。Neon 需要保留结果的父链，保留期间可能计费；失败或未知操作先按指南核对，不能另起一轮代替恢复。比较和选择方案不会自动合并到生产库。真实 Neon 云端结果必须单独记录，缺少凭据时保持未验证状态。
+
 ## 检查与验收
 
 ```sh
@@ -236,7 +293,7 @@ corepack pnpm test:stello
 1. **普通 PostgreSQL 独立验收。** 只提供连接 URL，连接后直接在普通项目对话提问。确认一次接入即可查询，目录、视图血缘和关系记忆不依赖 Neon API 或 Stello。
 2. **跨对话记忆与变化。** 建两到三张有隐性等值关系的表和一个视图，首次查询让 Agent 验证并保存关联。新对话查询另一个指标，确认读到原关系且执行复核。由测试维护者修改来源数据，使一条关联失效，再开对话查询；检查未归因数量、旧关系失效原因和原、新证据。
 3. **范围与权限。** 同项目的普通对话可访问共享来源；不同项目不可见。同项目其他会话不能读取某个任务的私有分支、执行记录或交付结果。源码或表结构变化后不能悄悄沿用旧定义。
-4. **分支实验。** 对 Neon API 来源和 Stello 分别创建隔离试验，修改工作分支，保存前后证据。独立查询来源确认原数据未变。模拟响应丢失或重启，验证原操作核对不会重复创建资源或写入。
+4. **分支实验。** 对 Neon API 来源和 Stello 分别保存一次共享基线，从同一基线创建 A/B 隔离试验，修改各自工作分支，用同一口径保存基线与方案证据。核对兄弟分支互不影响，独立查询来源确认原数据未变。模拟响应丢失或重启，验证原操作核对不会重复创建资源或写入。
 5. **清理与保留。** Stello 归还临时工作资源并保留结果。Neon 显示保留父链的原因，临时 compute 与访问已关闭，保存结果仍有证据可查；没有结果时验证自有分支删除完成。
 6. **界面路径。** 从普通对话直接打开指标证据，核对覆盖状态；从失效关系打开两份验证；从实验查看进度、前后比较与清理状态。重启 Host 后历史记录仍存在。
 

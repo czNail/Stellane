@@ -1,0 +1,127 @@
+{
+  "name": "support",
+  "schema": "stellane_demo_support",
+  "summary": "Keep unassigned work visible, then compare routing policies against a stated capacity budget.",
+  "unit": "estimated work minutes",
+  "tables": [
+    "service_queues",
+    "ticket_log"
+  ],
+  "metricSql": "SELECT q.team_name AS group_name, count(*)::text AS records, sum(t.estimated_minutes)::text AS total FROM stellane_demo_support.ticket_log t LEFT JOIN stellane_demo_support.service_queues q ON t.queue_hint=q.queue_key WHERE t.state='open' GROUP BY q.team_name ORDER BY q.team_name NULLS LAST",
+  "fingerprintSql": "SELECT md5(jsonb_build_object('queues',(SELECT jsonb_agg(to_jsonb(q) ORDER BY queue_key) FROM stellane_demo_support.service_queues q),'tickets',(SELECT jsonb_agg(to_jsonb(t) ORDER BY ticket_no) FROM stellane_demo_support.ticket_log t))::text) AS fingerprint",
+  "claims": [
+    {
+      "kind": "join",
+      "from": {
+        "schema": "stellane_demo_support",
+        "table": "ticket_log",
+        "columns": [
+          "queue_hint"
+        ]
+      },
+      "to": {
+        "schema": "stellane_demo_support",
+        "table": "service_queues",
+        "columns": [
+          "queue_key"
+        ]
+      }
+    }
+  ],
+  "metric": {
+    "name": "Open ticket workload by team",
+    "groupColumn": "team_name",
+    "amountColumn": "estimated_minutes",
+    "filter": {
+      "column": "state",
+      "value": "open"
+    }
+  },
+  "capacitySql": "SELECT q.team_name AS group_name,q.capacity_minutes::text AS capacity,COALESCE(sum(t.estimated_minutes),0)::text AS planned, greatest(COALESCE(sum(t.estimated_minutes),0)-q.capacity_minutes,0)::text AS over_capacity FROM stellane_demo_support.service_queues q LEFT JOIN stellane_demo_support.ticket_log t ON t.queue_hint=q.queue_key AND t.state='open' GROUP BY q.team_name,q.capacity_minutes ORDER BY q.team_name",
+  "expected": {
+    "baseline": [
+      {
+        "group_name": "General",
+        "records": "3",
+        "total": "270"
+      },
+      {
+        "group_name": "Specialist",
+        "records": "3",
+        "total": "200"
+      }
+    ],
+    "drift": [
+      {
+        "group_name": "General",
+        "records": "2",
+        "total": "300"
+      },
+      {
+        "group_name": "Specialist",
+        "records": "3",
+        "total": "200"
+      },
+      {
+        "group_name": null,
+        "records": "1",
+        "total": "90"
+      }
+    ],
+    "variantA": [
+      {
+        "group_name": "General",
+        "records": "3",
+        "total": "390"
+      },
+      {
+        "group_name": "Specialist",
+        "records": "3",
+        "total": "200"
+      }
+    ],
+    "variantB": [
+      {
+        "group_name": "General",
+        "records": "2",
+        "total": "300"
+      },
+      {
+        "group_name": "Specialist",
+        "records": "4",
+        "total": "290"
+      }
+    ]
+  },
+  "expectedCapacity": {
+    "variantA": [
+      {
+        "group_name": "General",
+        "capacity": "300",
+        "planned": "390",
+        "over_capacity": "90"
+      },
+      {
+        "group_name": "Specialist",
+        "capacity": "480",
+        "planned": "200",
+        "over_capacity": "0"
+      }
+    ],
+    "variantB": [
+      {
+        "group_name": "General",
+        "capacity": "300",
+        "planned": "300",
+        "over_capacity": "0"
+      },
+      {
+        "group_name": "Specialist",
+        "capacity": "480",
+        "planned": "290",
+        "over_capacity": "0"
+      }
+    ]
+  },
+  "interpretation": "Both policies account for all 6 open tickets / 590 estimated minutes. Policy B fits the supplied toy capacity budgets; this does not prove specialist eligibility, an SLA improvement or a real handling-time reduction."
+}

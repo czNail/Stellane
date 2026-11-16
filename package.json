@@ -16,7 +16,10 @@
     "DEVELOPMENT.md",
     "PRODUCT.md",
     "README.zh-CN.md",
-    "CONTRIBUTING.md"
+    "CONTRIBUTING.md",
+    "examples",
+    "docs",
+    "scripts/demo.mjs"
   ],
   "engines": {
     "node": ">=24.9.0",
@@ -44,13 +47,16 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
     "test": "node --test --experimental-strip-types tests/core.test.ts tests/onboarding.test.ts tests/neon.test.ts",
-    "test:integration": "node --test --test-concurrency=1 --experimental-strip-types tests/postgres.test.ts tests/catalog.test.ts tests/knowledge.test.ts tests/community.test.ts",
+    "test:integration": "node --test --test-concurrency=1 --experimental-strip-types tests/postgres.test.ts tests/catalog.test.ts tests/knowledge.test.ts tests/community.test.ts tests/demo-data.test.ts",
     "test:stello": "node --test --experimental-strip-types tests/stello.test.ts",
     "dev:db": "node scripts/dev-db.mjs",
     "dev:stello": "python3 -B scripts/dev-stello.py",
     "check": "pnpm typecheck && pnpm test && pnpm build",
     "test:neon": "node --test --experimental-strip-types tests/neon.test.ts",
-    "test:neon:live": "node --test --experimental-strip-types tests/neon-live.test.ts"
+    "test:neon:live": "node --test --experimental-strip-types tests/neon-live.test.ts",
+    "demo": "node scripts/demo.mjs",
+    "demo:branches": "node dist/demo-branches.js",
+    "test:demo": "node --test --experimental-strip-types tests/demo-data.test.ts"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "3.19.0",
