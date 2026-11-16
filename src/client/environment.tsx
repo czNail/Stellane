@@ -3,7 +3,7 @@ import type { Environment, Run, Snapshot } from '../shared/models.ts';
 import { ActionDialog, message, type Api } from './workspace-ui.tsx';
 
 export type EnvironmentAction = 'create' | 'checkpoint' | 'fork' | 'deliver';
-const titles: Record<EnvironmentAction, string> = { create: '创建环境', checkpoint: '固定当前状态', fork: '派生可写分支', deliver: '交付方案' };
+const titles: Record<EnvironmentAction, string> = { create: '启用查询', checkpoint: '保存基线', fork: '创建可写分支', deliver: '保存结果与证据' };
 
 export function EnvironmentDialog({ action, api, data, environment, initialConnection, onDone, onPending, onClose }: {
   action: EnvironmentAction;
@@ -61,7 +61,7 @@ export function EnvironmentDialog({ action, api, data, environment, initialConne
           <select value={connectionId} required onChange={event => setConnectionId(event.target.value)}>
             {data.connections.map(connection => <option key={connection.id} value={connection.id}>{connection.name}</option>)}
           </select></label>}
-        {action === 'checkpoint' && <p className="st-muted">将「{environment?.name}」的当前数据固定为只读切面。</p>}
+        {action === 'checkpoint' && <p className="st-muted">{environment?.neon ? `从「${environment.name}」的当前数据创建只读基线分支。` : `将「${environment?.name}」的当前数据固定为只读切面。`}</p>}
         {action === 'fork' && <p className="st-muted">从「{environment?.name}」派生一个独立的可写分支。</p>}
         {action === 'deliver' ? <>
           <label className="st-field"><span>接收环境</span><select value={recipient} onChange={event => setRecipientId(event.target.value)} required>
@@ -69,13 +69,13 @@ export function EnvironmentDialog({ action, api, data, environment, initialConne
           </select></label>
           <label className="st-field"><span>方案摘要</span><textarea className="st-prose-input" required maxLength={4000} rows={3} value={summary} onChange={event => setSummary(event.target.value)} /></label>
           <label className="st-field"><span>证据 SQL</span><textarea required maxLength={16384} rows={4} value={sql} onChange={event => setSql(event.target.value)} /></label>
-          <p className="st-muted">证据查询会在当前状态的固定切面上执行。</p>
-        </> : <label className="st-field"><span>{action === 'checkpoint' ? '切面名称' : action === 'fork' ? '分支名称' : '环境名称'}</span>
+          <p className="st-muted">保存当前结果后，在结果环境执行只读证据查询。</p>
+        </> : <label className="st-field"><span>{action === 'checkpoint' ? '基线名称' : action === 'fork' ? '分支名称' : '环境名称'}</span>
           <input required maxLength={80} value={name} onChange={event => setName(event.target.value)} placeholder={action === 'create' ? '例如：分析环境' : environment?.name} /></label>}
         {error && <p role="alert" className="st-error">{error}</p>}
         <div className="st-actions st-form-actions"><button className="st-button" type="button" onClick={onClose}>取消</button>
           <button className="st-button st-primary" type="submit" disabled={action === 'deliver' ? !recipient || !summary.trim() || !sql.trim() : !name.trim()}>
-            {busy ? '处理中…' : action === 'deliver' ? '固定并交付' : titles[action]}</button></div>
+            {busy ? '处理中…' : action === 'deliver' ? '保存结果与证据' : titles[action]}</button></div>
       </fieldset>
     </form>
   </ActionDialog>;

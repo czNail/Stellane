@@ -7,6 +7,7 @@ export interface QueryProvider {
   query(connection: ConnectionInput, input: QueryInput, signal: AbortSignal): Promise<QueryPreview>;
 }
 class PreviewLimitError extends Error {}
+class ConnectionPolicyError extends Error {}
 
 export async function secret(reference: string): Promise<string> {
   if (reference.startsWith('env:')) {
@@ -19,13 +20,29 @@ export async function secret(reference: string): Promise<string> {
   if (!info.isFile() || info.size > 8192 || (info.mode & 0o077) !== 0) {
     throw new Error('密码文件须为不超过 8 KiB、仅当前用户可访问的普通文件（权限 600）。');
   }
-  const value = (await readFile(filename, 'utf8')).trimEnd();
+  const value = (await readFile(filename, 'utf8')).replace(/\r?\n$/, '');
   if (!value) throw new Error('密码引用文件为空。');
   return value;
 }
 
 export function publicError(error: unknown): Error {
   const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+  const detail = error instanceof Error ? error.message : '';
+  const hints: Record<string, string> = {
+    ECONNREFUSED: '数据库拒绝连接，请检查主机、端口及服务是否已启动。',
+    ENOTFOUND: '无法解析数据库主机，请检查连接地址和网络。',
+    ETIMEDOUT: '数据库连接超时，请检查网络和数据库是否正在启动。',
+    '28P01': '数据库用户名或密码不正确，请重新检查连接凭据。',
+    '42501': '当前数据库用户没有执行此操作所需的权限。',
+    '57014': '查询已取消或超过数据库时限，请缩小查询范围后重试。',
+    '08006': '数据库连接中断，请检查数据库状态；只读查询可以重新执行。',
+    '42P01': '查询中的表或视图不存在，请重新查阅当前数据库目录。',
+    '42703': '查询中的字段不存在，请重新查阅当前表结构。',
+  };
+  if (hints[code]) return new Error(`${hints[code]}（${code}）`);
+  if (/Query read timeout/i.test(detail)) return new Error('数据库未在查询等待时限内响应，可能正在恢复或繁忙。请稍后重试只读查询。');
+  if (/timeout expired|connection timeout/i.test(detail)) return new Error('数据库连接等待超时，请检查网络和数据库是否正在启动。');
+  if (/Connection terminated/i.test(detail)) return new Error('数据库连接意外中断，请检查数据库状态。');
   return new Error(code && /^[A-Z0-9_]{2,40}$/.test(code)
     ? `数据库操作失败（${code}），请检查连接、权限或查询。`
     : '数据库连接或查询失败，请检查配置、密码引用及网络。');
@@ -50,24 +67,37 @@ export class PostgresProvider implements QueryProvider {
       host: connection.host, port: connection.port, database: connection.database,
       user: connection.user, password: await secret(connection.passwordRef),
       ssl: connection.tls === 'verify-full' ? { rejectUnauthorized: true } : false,
+      enableChannelBinding: connection.channelBinding !== 'disable',
+      connectionTimeoutMillis: connection.host.endsWith('.neon.tech') ? 15000 : 5000,
     } : connection;
     const client = new Client({
       ...options,
-      connectionTimeoutMillis: 5000, query_timeout: timeout,
+      connectionTimeoutMillis: options.connectionTimeoutMillis ?? 5000, query_timeout: timeout,
       application_name: 'stellane',
     });
     client.on('error', () => {});
+    const requireBinding = 'passwordRef' in connection && connection.channelBinding === 'require';
+    let bindingOffered = false;
+    if (requireBinding) client.connection.on('authenticationSASL', (message: { mechanisms: string[] }) => {
+      bindingOffered = message.mechanisms.includes('SCRAM-SHA-256-PLUS');
+    });
     const abort = () => { void client.end().catch(() => {}); };
     signal.addEventListener('abort', abort, { once: true });
     try {
       signal.throwIfAborted();
       await client.connect();
+      // pg selects PLUS when enabled and offered. Reject other authentication
+      // methods before any SQL if the pasted URL explicitly requires binding.
+      if (requireBinding && (!options.ssl || !bindingOffered)) {
+        throw new ConnectionPolicyError('服务器未提供所要求的 TLS 通道绑定认证。请检查数据库的 SCRAM-SHA-256-PLUS 配置。');
+      }
       signal.throwIfAborted();
       return await work(client);
     } catch (error) {
       if (signal.aborted) throw new Error('查询已取消。');
       if (error instanceof WriteOutcomeError) throw error;
       if (error instanceof PreviewLimitError) throw error;
+      if (error instanceof ConnectionPolicyError) throw error;
       throw publicError(error);
     } finally {
       signal.removeEventListener('abort', abort);

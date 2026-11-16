@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Environment, Run } from '../shared/models.ts';
+import { describeEnvironment } from '../shared/capabilities.ts';
 import { QueryResult, type Conversation } from './explore.tsx';
 import { message, type Api } from './workspace-ui.tsx';
 
@@ -42,7 +43,7 @@ export function RunEvidence({ id, api, environments, openEvidence, openConversat
     <button className="st-button st-quiet st-back" onClick={onBack}>← 任务与结果</button>
     <div className="st-page-heading"><div><h2>执行证据</h2>
       {run && <p className="st-muted">{environment?.name ?? run.branch?.resource ?? run.target?.database} · {new Date(run.startedAt).toLocaleString()}</p>}</div>
-      {run && metric?.counts && metric.status !== 'complete' && environment?.stello && !environment.experimentId && environment.mode !== 'branch'
+      {run && metric?.counts && metric.status !== 'complete' && environment && describeEnvironment(environment).canExperiment
         && <button className="st-button st-primary" disabled={opening} onClick={() => void tryRepair(environment, run)}>试算修复</button>}</div>
     {failure && <p role="alert" className="st-error">{failure}</p>}
     {!run && !failure && <p role="status">正在读取执行记录…</p>}
@@ -50,14 +51,15 @@ export function RunEvidence({ id, api, environments, openEvidence, openConversat
     {metric && <section className="st-stack st-task-section" aria-label="指标口径与复核">
       <h3>口径与关系</h3>
       <p className="st-muted">口径版本 {metric.version.slice(0,12)}{metric.snapshot && <> · 数据快照 {metric.snapshot}</>}</p>
+      <p className="st-path">明细范围 {metric.plan.relationships[0]?.from.schema}.{metric.plan.relationships[0]?.from.table}
+        {metric.plan.filter ? <> · {metric.plan.filter.column} = {JSON.stringify(metric.plan.filter.value)}</> : ' · 全部记录'}</p>
       <p>按 {metric.plan.groupColumn} 分组、计数
-        {metric.plan.amountColumn && <>、对 {metric.plan.amountColumn} 求和</>}
-        {metric.plan.filter && <> · {metric.plan.filter.column} = {String(metric.plan.filter.value)}</>}</p>
+        {metric.plan.amountColumn && <>、对 {metric.plan.amountColumn} 求和</>}</p>
       {metric.plan.relationships.map((item,i)=> {
         const check = metric.checks?.[i];
         return <article key={item.id} className="st-list-row st-stack">
           <p className="st-path">{item.from.schema}.{item.from.table}（{item.from.columns.join('、')}） → {item.to.schema}.{item.to.table}（{item.to.columns.join('、')}）</p>
-          {check && <p>{check.eligible} 条待匹配 · 缺少对应记录 {check.missing} 条 · 对应多条 {check.ambiguous} 条</p>}
+          {check && <p>本次指标范围 · {check.eligible} 条待匹配 · 缺少对应记录 {check.missing} 条 · 对应多条 {check.ambiguous} 条</p>}
           <div><button className="st-button" onClick={() => openEvidence(item.sourceRunId)}>查看关系原验证</button></div>
         </article>;
       })}

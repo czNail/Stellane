@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import type { Operation, Requests, Responses } from '../shared/remote.ts';
 import type { Environment } from '../shared/models.ts';
+import { describeEnvironment } from '../shared/capabilities.ts';
 
 export type Api = <K extends Operation>(name: K, input: Requests[K]) => Promise<Responses[K]>;
 
@@ -8,10 +9,13 @@ export function message(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败，请重试。';
 }
 
+export interface ProjectAccess {
+  currentPath: () => string | undefined;
+  pickDirectory: () => Promise<string | null>;
+}
+
 export function environmentLabel(environment: Environment): string {
-  if (environment.mode === 'fixed') return '固定切面';
-  if (environment.access === 'read-write') return '可写分支';
-  return environment.stello ? '只读来源' : '实时只读';
+  return describeEnvironment(environment).stateLabel;
 }
 
 export function environmentTree(environments: Environment[]): { environment: Environment; depth: number }[] {

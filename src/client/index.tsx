@@ -8,7 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client';
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client';
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client';
 import type { UiWorkspace } from '@deepseek-ai/dsh-client-ui-workspace/client';
-import type {} from '@deepseek-ai/dsh-api-session-controller/client';
+import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client';
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client';
 import type { ToolCallBlock } from '@deepseek-ai/dsh-client-ui-conversation/client';
 import type { SessionId } from '@deepseek-ai/dsh-session/types';
@@ -18,16 +18,16 @@ import type { Run } from '../shared/models.ts';
 import styles from './styles.css';
 import { Panel, SettingsPage } from './panel.tsx';
 import { runStatus } from './explore.tsx';
-import type { Api } from './workspace-ui.tsx';
+import type { Api, ProjectAccess } from './workspace-ui.tsx';
 import { MetricSummary } from './metric.tsx';
 
 const toolLabels: Record<string, string> = {
-  stellane_context: '语义上下文', stellane_query: '查询数据', stellane_environments: '可用环境', stellane_execute: '提交写入',
+  stellane_context: '查阅表与口径', stellane_query: '查询数据', stellane_environments: '可用环境', stellane_execute: '提交写入',
   stellane_learn: '核对数据关系',
   stellane_metric: '指标结果',
   stellane_start_experiment: '创建实验', stellane_experiments: '查看实验',
-  stellane_capture_experiment: '固定并交付', stellane_finish_experiment: '清理实验',
-  stellane_checkpoint: '固定状态', stellane_fork: '派生环境', stellane_deliver: '交付方案',
+  stellane_capture_experiment: '保存结果与证据', stellane_finish_experiment: '清理实验',
+  stellane_checkpoint: '保存基线', stellane_fork: '创建独立分支', stellane_deliver: '交付方案',
   stellane_results: '收到的结果', stellane_reconcile_write: '核对写入', stellane_reconcile_branch: '核对派生',
 };
 export const inject = ['remote', 'slots'];
@@ -125,6 +125,16 @@ function mountUI(ctx: Context): void {
     }
   };
   const openSession = (id: string) => { ctx.uiWorkspace.openSession(id as SessionId); };
+  const projectAccess: ProjectAccess = {
+    currentPath() {
+      const sessions = ctx.sessions.list.getSnapshot() as SessionListState;
+      return Object.values(sessions.byId).find(session => {
+        const owners: Readonly<Record<string, number | undefined>> = session.retainedBy;
+        return (owners.mainView ?? 0) > 0;
+      })?.cwd;
+    },
+    pickDirectory: () => ctx.uiWorkspace.pickDirectory(),
+  };
   const navigation = new EventTarget();
   let evidence: { id: string } | undefined;
   const openEvidence = (id: string) => {
@@ -141,10 +151,10 @@ function mountUI(ctx: Context): void {
     clear() { evidence = undefined; navigation.dispatchEvent(new Event('navigate')); },
   };
   ctx.slots.inject('main', () => ctx.slots.register({
-    name: 'main', key: 'stellane', inject: () => ({ api, openConversation, openSession, openEvidence, evidenceNavigation }),
+    name: 'main', key: 'stellane', inject: () => ({ api, openConversation, openSession, openEvidence, evidenceNavigation, projectAccess }),
   }, Panel));
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: 'stellane', order: 30, label: 'Stellane' }, Icon));
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'stellane', order: 50, label: 'Stellane', inject: () => ({ api }) }, SettingsPage));
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'stellane', order: 50, label: 'Stellane', inject: () => ({ api, projectAccess }) }, SettingsPage));
   for (const key of Object.keys(toolLabels)) {
     ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, inject: () => ({ openEvidence }) }, ToolCard));
   }

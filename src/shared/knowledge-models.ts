@@ -18,7 +18,7 @@ export interface KnowledgeEvidence {
   runId: string;
   contextId: string;
   observedAt: string;
-  method: 'postgres-catalog' | 'key-profile' | 'join-profile';
+  method: 'postgres-catalog' | 'key-profile' | 'join-profile' | 'metric-coverage';
   snapshot: string;
 }
 
@@ -46,7 +46,7 @@ export interface ProfiledKnowledge {
   fact: ProfiledFact;
   evidence: KnowledgeEvidence;
   dependencyFingerprint: string;
-  invalidation?: { reason: string; evidence: KnowledgeEvidence; unmatchedRows?: string };
+  invalidation?: { reason: string; evidence: KnowledgeEvidence; unmatchedRows?: string; scope?: string };
 }
 
 export type KnowledgeItem = { id: string; fact: ViewLineage; evidence: KnowledgeEvidence; status: 'declared' }

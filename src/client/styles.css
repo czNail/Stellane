@@ -245,3 +245,9 @@
   .st-empty { padding: 20px; }
   .st-dialog { padding: 15px; }
 }
+
+.st-path-input { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.st-path-input input { flex: 1; }
+.st-check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.st-check input { accent-color: var(--st-accent); }
+.st-capability-line { color: var(--st-accent); font-size: 12px; margin-top: 4px !important; }

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Actor, BranchBinding, DatabaseTarget } from './models.ts';
 import type { KnowledgeItem } from './knowledge-models.ts';
+import type { NeonBinding } from './neon-models.ts';
 
 const id = z.string().uuid();
 export const contextInput = z.strictObject({
@@ -33,9 +34,9 @@ export type RelationMetadata = z.infer<typeof relationSchema>;
 export type DatabaseMetadata = z.infer<typeof metadataSchema>;
 export interface DataState {
   environmentId: string; dataSourceId: string; mode: 'live' | 'fixed' | 'branch'; observedAt: string;
-  target: DatabaseTarget; databaseOid: string; branch?: BranchBinding;
+  target: DatabaseTarget; databaseOid: string; branch?: BranchBinding; neon?: NeonBinding;
   dataVersion: { kind: 'observation' | 'fixed-position'; snapshot: string; position?: string };
-  identityBasis: 'registration-and-target' | 'stello-resource';
+  identityBasis: 'registration-and-target' | 'stello-resource' | 'neon-branch';
 }
 export interface ContextRecord {
   id: string; environmentId: string; projectPath: string; dataSourceId: string; sourceFingerprint: string;

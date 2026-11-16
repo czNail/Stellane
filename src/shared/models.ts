@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { MetricEvidence } from './metric-models.ts';
+import type { NeonBinding, NeonSource } from './neon-models.ts';
 
 export const connectionInput = z.strictObject({
   name: z.string().trim().min(1).max(80),
@@ -10,6 +11,7 @@ export const connectionInput = z.strictObject({
   user: z.string().trim().min(1).max(63),
   passwordRef: z.string().regex(/^(env:[A-Z_][A-Z0-9_]*|file:\/[^\r\n]+)$/),
   tls: z.enum(['disable', 'verify-full']),
+  channelBinding: z.enum(['disable', 'prefer', 'require']).optional(),
 });
 export type ConnectionInput = z.infer<typeof connectionInput>;
 export interface Connection extends ConnectionInput { id: string; createdAt: string }
@@ -32,8 +34,8 @@ export type EnvironmentInput = z.infer<typeof environmentInput>;
 export interface Environment {
   id: string; connectionId?: string; name: string; projectPath: string;
   mode: 'live' | 'fixed' | 'branch'; access: 'read-only' | 'read-write'; createdAt: string;
-  parentEnvironmentId?: string; stello?: BranchBinding;
-  experimentId?: string; removedAt?: string;
+  parentEnvironmentId?: string; stello?: BranchBinding; neon?: NeonBinding;
+  experimentId?: string; removedAt?: string; retainedReason?: string;
 }
 export const deriveInput = z.strictObject({
   environmentId: z.string().uuid(), name: z.string().trim().min(1).max(80),
@@ -66,12 +68,15 @@ export interface Run {
   startedAt: string; finishedAt?: string; durationMs?: number;
   target?: DatabaseTarget; preview?: QueryPreview; error?: string;
   branch?: BranchBinding;
+  neon?: NeonBinding;
   metric?: MetricEvidence;
 }
 export interface BranchOperation {
   id: string; kind: 'checkpoint' | 'fork'; providerId: string; parentEnvironmentId: string;
+  providerKind?: 'neon';
   resource: string; actor: Actor; environment: Environment; request?: Record<string, unknown>; inputDigest?: string;
   status: 'pending' | 'succeeded' | 'failed' | 'unknown'; error?: string; createdAt: string;
+  rejectedAttempts?: { status: number; at: string; request: Record<string, unknown> }[];
 }
 export interface Delivery {
   id: string; sourceEnvironmentId: string; recipientEnvironmentId: string; snapshotEnvironmentId: string;
@@ -92,6 +97,7 @@ export interface Experiment {
   baselineId?: string; workId?: string; resultId?: string; deliveryId?: string; sessionId?: string;
   metricRunId?: string; baselineMetricRunId?: string;
   evidence?: { summary: string; sql: string; values?: QueryInput['values'] }; error?: string;
+  retentionNote?: string;
 }
 export interface ExperimentDetail {
   experiment: Experiment; source: Environment; baseline?: Environment; work?: Environment; result?: Environment;
@@ -107,4 +113,5 @@ export interface Snapshot {
   connections: Connection[]; environments: Environment[]; runs: Run[];
   providers: StelloSource[]; operations: BranchOperation[]; deliveries: Delivery[];
   experiments: Experiment[];
+  neonSources?: NeonSource[];
 }

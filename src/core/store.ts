@@ -4,10 +4,11 @@ import { join } from 'node:path';
 import type { BranchOperation, BranchRemoval, Connection, ConversationScope, Delivery, Environment, Experiment, Run, StelloSource } from '../shared/models.ts';
 import type { CatalogImport, ContextRecord, SemanticDefinition } from '../shared/context-models.ts';
 import type { ProfiledKnowledge } from '../shared/knowledge-models.ts';
+import type { NeonSource, NeonRemoval } from '../shared/neon-models.ts';
 
 interface Records { connections: Connection; environments: Environment; runs: Run; providers: StelloSource; operations: BranchOperation; deliveries: Delivery;
   contexts: ContextRecord; definitions: SemanticDefinition; catalogImports: CatalogImport; knowledge: ProfiledKnowledge;
-  experiments: Experiment; scopes: ConversationScope; removals: BranchRemoval }
+  experiments: Experiment; scopes: ConversationScope; removals: BranchRemoval; neonSources: NeonSource; neonRemovals: NeonRemoval }
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -32,8 +33,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS experiments (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS scopes (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS removals (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS neonSources (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS neonRemovals (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS knowledge_environment ON knowledge(json_extract(body,'$.environmentId'));
-      PRAGMA user_version=5;`);
+      PRAGMA user_version=6;`);
     const unfinished = this.db.prepare("SELECT body FROM runs WHERE json_extract(body, '$.status') = 'running'").all();
     for (const row of unfinished) {
       const run = JSON.parse(row.body as string) as Run;

@@ -6,6 +6,11 @@ import { DefinitionEditor, definitionKinds } from './catalog-editor.tsx';
 import { ActionDialog, message, type Api } from './workspace-ui.tsx';
 
 const tabs = { tables: '表与字段', definitions: '业务说明', relationships: '关系与血缘' };
+const tabHelp = {
+  tables: '数据库中的实际结构与注释，帮助理解有哪些数据。',
+  definitions: '团队提供的字段含义、计算口径和参考 SQL，帮助明确问题该怎样计算。',
+  relationships: '查看数据库声明的依赖，以及 Agent 验证并记住的关系。历史观察会在数据变化后重新核对。',
+};
 type CatalogTab = keyof typeof tabs;
 type Editor = { kind: 'form'; definition?: SemanticDefinition } | { kind: 'import' };
 const endpointName = (endpoint: KnowledgeEndpoint) => `${endpoint.schema}.${endpoint.table}（${endpoint.columns.join('、')}）`;
@@ -21,21 +26,28 @@ function KnowledgeList({ items, search, openEvidence }: { items: KnowledgeItem[]
   const matches = items.filter(item => knowledgeLabel(item).toLocaleLowerCase().includes(search));
   const current = matches.filter(item => item.status !== 'superseded' && item.status !== 'stale');
   const history = matches.filter(item => item.status === 'superseded' || item.status === 'stale');
-  const render = (item: KnowledgeItem) => <details className="st-list-row st-catalog-item" key={item.id}>
+  const render = (item: KnowledgeItem) => {
+    const invalidation = 'invalidation' in item ? item.invalidation : undefined;
+    const metricCheck = !!invalidation?.scope || invalidation?.evidence.method === 'metric-coverage';
+    const checkLabel = metricCheck ? '本次指标检查' : '本次复核';
+    return <details className="st-list-row st-catalog-item" key={item.id}>
     <summary><span>{knowledgeLabel(item)}</span><small>{item.fact.kind === 'join' && `${item.fact.cardinality === 'many-to-one' ? '多对一' : '一对一'} · `}{knowledgeStatus[item.status]}</small></summary>
     <div className="st-item-body">
       {item.fact.kind === 'view-lineage' ? <p>引用字段 {item.fact.upstream.columns.join('、') || '整表依赖'}</p>
         : item.fact.kind === 'row-key' ? <p>观测 {item.fact.profile.rows} 行 · 空键 {item.fact.profile.nullRows} 行 · 重复键 {item.fact.profile.duplicateKeys} 组</p>
-          : <p>{('invalidation' in item && item.invalidation) ? '原验证 · ' : ''}来源 {item.fact.source.rows} 行 · 目标 {item.fact.target.rows} 行 · 未匹配 {item.fact.unmatchedRows} 行</p>}
-      {'invalidation' in item && item.invalidation?.unmatchedRows !== undefined && <p>本次复核 · 未匹配 {item.invalidation.unmatchedRows} 行</p>}
+          : <p>{invalidation ? '原验证 · ' : ''}来源 {item.fact.source.rows} 行 · 目标 {item.fact.target.rows} 行 · 未匹配 {item.fact.unmatchedRows} 行</p>}
+      {invalidation?.scope && <p className="st-muted">检查范围 · {invalidation.scope}</p>}
+      {invalidation?.unmatchedRows !== undefined && <p>{checkLabel} · {metricCheck ? '范围内未匹配' : '未匹配'} {invalidation.unmatchedRows} 行</p>}
       {'reason' in item && item.reason && <p className="st-muted">{item.reason}</p>}
       <details className="st-details"><summary>验证证据</summary>
-        <p className="st-path">{new Date(item.evidence.observedAt).toLocaleString()}{'version' in item && ` · 版本 ${item.version}`}</p>
+        <p className="st-path">原验证 {new Date(item.evidence.observedAt).toLocaleString()}{'version' in item && ` · 版本 ${item.version}`}</p>
+        {invalidation && <p className="st-path">{checkLabel} {new Date(invalidation.evidence.observedAt).toLocaleString()}</p>}
         <div className="st-actions"><button className="st-button" onClick={() => openEvidence(item.evidence.runId)}>打开原验证记录</button>
-          {'invalidation' in item && item.invalidation && <button className="st-button" onClick={() => openEvidence(item.invalidation!.evidence.runId)}>打开本次复核</button>}</div>
+          {invalidation && <button className="st-button" onClick={() => openEvidence(invalidation.evidence.runId)}>打开{checkLabel}</button>}</div>
       </details>
     </div>
   </details>;
+  };
   return <div className="st-stack">
     {current.length ? <div className="st-list">{current.map(render)}</div>
       : <p className="st-list-empty">{search ? '没有匹配的关系或血缘。' : '暂无已发现的关系。可以让 Agent 调查两张表的关联键或某个视图的来源。'}</p>}
@@ -178,6 +190,7 @@ export function CatalogPanel({ api, environment, onExplore, openEvidence }: {
       <button className="st-button st-quiet" onClick={onExplore}>去探索</button></div>
     <nav className="st-tabs" aria-label="目录分类">{Object.entries(tabs).map(([key, label]) => <button key={key}
       aria-pressed={tab === key} onClick={() => { setTab(key as CatalogTab); setSearch(''); setFeedback(''); }}>{label}</button>)}</nav>
+    <p className="st-muted">{tabHelp[tab]}</p>
     <div className="st-catalog-toolbar">
       <input className="st-search" aria-label={`搜索${tabs[tab]}`} placeholder={tab === 'tables' ? '搜索表名、字段或注释' : `搜索${tabs[tab]}`}
         type="search" value={search} onChange={event => setSearch(event.target.value)} disabled={!view} />
@@ -199,7 +212,8 @@ export function CatalogPanel({ api, environment, onExplore, openEvidence }: {
         <p className="st-path">{view.context.state.target.database} · {new Date(view.context.state.observedAt).toLocaleString()}</p>
         <p className="st-path">环境 {view.context.environmentId} · 执行 {view.context.runId}</p>
         {view.context.state.branch && <p className="st-path">{view.context.state.branch.resource} · 来源位置 {view.context.state.branch.forkLsn}</p>}
-        {view.context.state.dataVersion.position && <p className="st-path">固定位置 {view.context.state.dataVersion.position}</p>}
+        {environment.neon && <p className="st-path">Neon 分支 {environment.neon.branchId}</p>}
+        {view.context.state.dataVersion.position && <p className="st-path">数据位置 {view.context.state.dataVersion.position}</p>}
         <p className="st-path">结构指纹 {view.context.schemaFingerprint} · 目录指纹 {view.context.catalogFingerprint}</p>
       </details>
     </>}

@@ -15,6 +15,7 @@ import { StellaneCore } from '../core/index.ts';
 import { PACKAGE, remoteInfo, type Reply, type Requests, type Responses } from '../shared/remote.ts';
 import type { Actor, BranchOperation, Connection, DatabaseTarget, DeliveredResult, Environment, Run, Snapshot } from '../shared/models.ts';
 import { dataSkill } from './data-skill.ts';
+import { describeEnvironment } from '../shared/capabilities.ts';
 
 export interface Config { stateDirectory?: string }
 export const Config = Schema.object({
@@ -38,6 +39,15 @@ export class StellaneService extends TypertRemoteService {
   }
   saveConnection(input: Requests['saveConnection'], _signal: AbortSignal): Promise<Reply<Connection>> {
     return this.owner(() => this.core.saveConnection(input));
+  }
+  connectPostgres(input: Requests['connectPostgres'], signal: AbortSignal): Promise<Reply<Environment>> {
+    return this.owner(() => this.core.connectPostgres(input, signal));
+  }
+  connectNeon(input: Requests['connectNeon'], signal: AbortSignal): Promise<Reply<Environment>> {
+    return this.owner(() => this.core.connectNeon(input, signal));
+  }
+  saveNeon(input: Requests['saveNeon'], signal: AbortSignal): Promise<Reply<Environment>> {
+    return this.owner(() => this.core.saveNeon(input, signal));
   }
   probe(input: Requests['probe'], signal: AbortSignal): Promise<Reply<DatabaseTarget>> {
     return this.owner(() => this.core.probe(input.connectionId, signal));
@@ -148,9 +158,9 @@ export function apply(ctx: Context, config: Config): void {
     const workflow = ctx.tools.get('skill', scope, toolSet)
       ? `先用 skill 加载 ${dataSkill.name}，再按说明调查。`
       : '先调用 stellane_environments 选择适用环境，再用 stellane_context 核对业务口径和表结构，需要时用 stellane_query 只读查询。';
-    const experiment = environments.some(item => item.stello && !item.experimentId && item.mode !== 'branch')
+    const experiment = environments.some(item => describeEnvironment(item).canExperiment)
       && ctx.tools.get('stellane_start_experiment', scope, toolSet)
-      ? '如果用户明确要模拟改动或在独立分支验证方案，使用 stellane_start_experiment 开始，并把结果固定交付。'
+      ? '如果用户明确要模拟改动或在独立分支验证方案，使用 stellane_start_experiment 开始，并保存结果与证据。'
       : '';
     return { ...prompt, sections: [...prompt.sections, {
       name: 'stellane-data', text: `当前对话可使用 Stellane。用户要调查项目数据、业务口径或数据血缘时，${workflow}${experiment}`,
@@ -158,10 +168,11 @@ export function apply(ctx: Context, config: Config): void {
   });
   ctx.tools.register(defineTool({
     name: 'stellane_environments',
-    description: '列出当前 Agent 项目中可用的 Stellane 数据环境、来源、读写权限和 Stello 资源身份。环境 ID 只定位环境；每次操作都会核对项目和数据库身份。',
+    description: '列出当前项目可用的数据库、读写权限和能力。PostgreSQL、Neon、Stello 均可查询和积累记忆；capabilities.canExperiment 表示可以开启独立试验。每次访问均检查项目与来源身份。',
     parameters: {}, output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(_args, exec) {
-      return JSON.parse(JSON.stringify(await core.environments(actor(exec.agent, exec.callId))));
+      return JSON.parse(JSON.stringify((await core.environments(actor(exec.agent, exec.callId)))
+        .map(environment => ({ ...environment, capabilities: describeEnvironment(environment) }))));
     },
   }));
   ctx.tools.register(defineTool({
@@ -200,7 +211,7 @@ export function apply(ctx: Context, config: Config): void {
   }));
   ctx.tools.register(defineTool({
     name: 'stellane_start_experiment',
-    description: '在普通项目对话为用户明确要求的验证创建实验。选择 Stello 来源或固定基线。返回任务 ID 和私有 work.id，后续 SQL 只使用 work.id。用同样的环境和名称可恢复未结束的原实验。',
+    description: '在普通项目对话为用户明确要求的验证创建实验。选择具备 canExperiment 能力的 Neon 或 Stello 来源。返回任务 ID 和私有 work.id，后续 SQL 只使用 work.id。用同样的环境和名称可恢复未结束的原实验。',
     parameters: { environmentId, name: { type: 'string', required: true, description: '概括用户要验证的假设，长度不超过 80 字' },
       metricRunId: { type: 'string', description: '从异常正式指标发起修复试算时传入原执行记录 ID，固定基线与结果按原口径重算' } },
     output,
@@ -210,7 +221,7 @@ export function apply(ctx: Context, config: Config): void {
   }));
   ctx.tools.register(defineTool({
     name: 'stellane_experiments',
-    description: '查看当前对话创建或绑定的实验。用实验 ID 查看阶段、工作分支、SQL 记录及固定结果；省略 ID 列出近期实验。恢复中断时先查看原任务。',
+    description: '查看当前对话创建或绑定的实验。用实验 ID 查看阶段、工作分支、SQL 记录及保留结果；省略 ID 列出近期实验。恢复中断时先查看原任务。',
     parameters: { id: { type: 'string', description: '可选，本对话的实验 ID' } },
     output,
     async execute(args, exec) {
@@ -219,7 +230,7 @@ export function apply(ctx: Context, config: Config): void {
   }));
   ctx.tools.register(defineTool({
     name: 'stellane_capture_experiment',
-    description: '固定本对话的实验结果，在固定切面执行只读证据 SQL 并交付。证据失败可补查原切面。检查 delivered 和 experiment.error 判断是否已交付。',
+    description: '保存本对话的实验结果，在保留的只读分支执行证据 SQL 并交付。Stello 提供不可变快照，Neon 为受只读保护的分支。证据失败可补查原结果。检查 delivered 和 experiment.error 判断是否已交付。',
     parameters: {
       id: experimentId,
       summary: { type: 'string', required: true, description: '验证方案、实测结论和适用范围' },
@@ -233,7 +244,7 @@ export function apply(ctx: Context, config: Config): void {
   }));
   ctx.tools.register(defineTool({
     name: 'stellane_finish_experiment',
-    description: '结束本对话已交付的实验，释放并清理临时工作分支与本任务创建的基线，保留固定结果和 SQL 证据。结果待核对时可用同一实验 ID 继续清理。',
+    description: '结束本对话已交付的实验，保留结果与 SQL 证据。Stello 清理临时分支；Neon 删除临时 compute 并撤销访问，结果依赖的父分支继续保留，参见 retentionNote。结果待核对时可用同一实验 ID 继续清理。',
     parameters: { id: experimentId },
     output,
     async execute(args, exec) {
@@ -264,8 +275,8 @@ export function apply(ctx: Context, config: Config): void {
   for (const kind of ['checkpoint', 'fork'] as const) {
     ctx.tools.register(defineTool({
       name: `stellane_${kind}`,
-      description: kind === 'checkpoint' ? '固定当前 Stello 环境已提交的数据状态，返回只读切面及实际来源位置。派生多个方案前先固定一次；临时表和未提交事务不继承。'
-        : '从固定只读切面派生一个可写 Stello 环境。兄弟环境应使用同一切面；返回新的独立环境 ID，后续 SQL 显式传此 ID。',
+      description: kind === 'checkpoint' ? '从具备分支能力的来源保存只读基线。Stello 为固定快照，Neon 为受只读保护的分支。临时表和未提交事务不继承。'
+        : '从已保存的只读基线派生独立可写分支。返回新环境 ID，后续 SQL 显式传此 ID。Neon 和 Stello 均支持，普通 PostgreSQL 连接不具备此能力。',
       parameters: { environmentId, name: { type: 'string', required: true, description: '便于用户识别的新环境名称' } }, output,
       async execute(args, exec) { return JSON.parse(JSON.stringify(await core.derive(kind, args, actor(exec.agent, exec.callId), exec.signal))); },
     }));
@@ -277,7 +288,7 @@ export function apply(ctx: Context, config: Config): void {
     async execute(args, exec) { return JSON.parse(JSON.stringify(await core.write(args, actor(exec.agent, exec.callId), exec.signal))); },
   }));
   ctx.tools.register(defineTool({
-    name: 'stellane_deliver', description: '向祖先环境交付方案：固定当前可写环境，针对固定切面执行只读证据查询，并保存不可编辑的摘要、来源、结果与交付对象。交付后继续修改工作环境不会改变已交付结果。',
+    name: 'stellane_deliver', description: '向祖先环境交付方案：固定当前可写环境，针对固定切面执行只读证据查询，并保存不可编辑的摘要、来源、结果与交付对象。交付后工作分支的修改不会传入结果分支。Neon 结果仍可能被外部管理员修改，不能视为不可变快照。',
     parameters: { environmentId, recipientEnvironmentId: { type: 'string', required: true, description: '接收结果的祖先环境 ID' },
       summary: { type: 'string', required: true, description: '方案摘要与适用约束' },
       sql: { type: 'string', required: true, description: '交付切面上的单条只读证据查询' } }, output,

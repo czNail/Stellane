@@ -148,6 +148,12 @@ test('real Stello inheritance, sibling isolation, fixed delivery and unknown-wri
       parent: parent.id, childA: a.id, childB: b.id, delivery: delivered.delivery.id,
       sourceLsn: cut.stello!.forkLsn, checks: ['inheritance', 'sibling-isolation', 'fixed-delivery', 'nested-fork', 'identity-fence', 'project-fence', 'transaction-fence', 'receipt-without-replay'],
     }, null, 2), { mode: 0o600 });
+  } catch (error) {
+    await writeFile(join(dirname(configPath), 'integration-failure.json'), JSON.stringify({
+      message: error instanceof Error ? error.message : String(error),
+      runs: core.snapshot().runs.slice(0, 12),
+    }, null, 2), { mode: 0o600 });
+    throw error;
   } finally {
     remember(); await core.close();
     // Only test-created resource identities are eligible for cleanup.

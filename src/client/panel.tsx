@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { Environment, ExperimentDetail, Run, Snapshot } from '../shared/models.ts';
+import { describeEnvironment } from '../shared/capabilities.ts';
 import { CatalogPanel } from './catalog.tsx';
 import { Connections } from './connections.tsx';
 import { EnvironmentDialog, type EnvironmentAction } from './environment.tsx';
 import { Explore, runStatus, type Conversation, type ExploreMode } from './explore.tsx';
 import { ExperimentList, ExperimentView, StartExperiment } from './experiments.tsx';
-import { ActionDialog, environmentLabel, environmentTree, message, type Api } from './workspace-ui.tsx';
+import { ActionDialog, environmentLabel, environmentTree, message, type Api, type ProjectAccess } from './workspace-ui.tsx';
 import { RunEvidence } from './evidence.tsx';
 
 const empty: Snapshot = { connections: [], environments: [], runs: [], providers: [], operations: [], deliveries: [], experiments: [] };
@@ -35,8 +36,8 @@ function useSnapshot(api: Api) {
   return { data, loading, error, refresh };
 }
 
-export function Panel({ api, openConversation, openSession, openEvidence, evidenceNavigation }: {
-  api: Api; openConversation: Conversation; openSession: (sessionId: string) => void;
+export function Panel({ api, openConversation, openSession, openEvidence, evidenceNavigation, projectAccess }: {
+  api: Api; projectAccess?: ProjectAccess; openConversation: Conversation; openSession: (sessionId: string) => void;
   openEvidence: (id: string) => void;
   evidenceNavigation: { read: () => { id: string } | undefined; subscribe: (fn: () => void) => () => void; clear: () => void };
 }) {
@@ -59,7 +60,8 @@ export function Panel({ api, openConversation, openSession, openEvidence, eviden
   const available = data.environments.filter(item => !item.experimentId || item.id === selected);
   const pending = data.operations.filter(item => !item.environment.experimentId && (item.status === 'pending' || item.status === 'unknown'));
   const connection = data.connections.find(item => item.id === environment?.connectionId);
-  const canStart = !!environment?.stello && !environment.experimentId;
+  const capability = environment ? describeEnvironment(environment) : undefined;
+  const canStart = capability?.canExperiment;
   const showingEnvironment = page === 'explore' || page === 'catalog';
   const recentRuns = page === 'experiments' && !experimentId
     ? data.runs.filter(run => !run.purpose && available.some(item => item.id === run.environmentId && !item.experimentId)).slice(0, 8)
@@ -148,41 +150,41 @@ export function Panel({ api, openConversation, openSession, openEvidence, eviden
             {environmentTree(available).map(({ environment: item, depth }) => <option key={item.id} value={item.id}>
               {'　'.repeat(Math.min(depth, 4))}{depth ? '↳ ' : ''}{item.name} · {environmentLabel(item)}</option>)}
           </select></label>
-          <span className="st-environment-source">{environment?.stello?.resource ?? connection?.database}</span>
+          <span className="st-environment-source">{environment?.neon?.branchId ?? environment?.stello?.resource ?? connection?.database}</span>
           <div className="st-actions st-environment-actions">
             {environment?.experimentId && <button className="st-button" onClick={() => openExperiment(environment.experimentId!)}>返回任务</button>}
             {page === 'explore' && canStart && <button className="st-button" onClick={() => setStarting(environment)}>开始实验</button>}
             {pending.length > 0 && <button className="st-button st-quiet" onClick={() => setOperationsOpen(true)}>分支操作 {pending.length}</button>}
             {environment && !environment.experimentId && <details className="st-menu" ref={menu}><summary className="st-button">环境操作</summary><div className="st-menu-body">
-              {data.connections.length > 0 && <button onClick={() => showAction('create')}>创建环境</button>}
-              {environment.stello && <button onClick={() => showAction(environment.mode === 'fixed' ? 'fork' : 'checkpoint')}>
-                {environment.mode === 'fixed' ? '派生可写分支' : '固定当前状态'}</button>}
+              {capability?.canDerive && <button onClick={() => showAction(environment.mode === 'fixed' ? 'fork' : 'checkpoint')}>
+                {environment.mode === 'fixed' ? '创建可写分支' : environment.neon ? '保存只读基线' : '固定当前状态'}</button>}
               {environment.access === 'read-write' && environment.parentEnvironmentId && <button onClick={() => showAction('deliver')}>交付方案</button>}
               <button onClick={() => navigate('connections')}>管理连接</button>
             </div></details>}
           </div>
         </div>}
         <div className="st-page">
-          {page === 'connections' && <Connections api={api} data={data} refresh={refresh}
-            onOpen={environment => openEnvironment(environment.id)} onCreate={id => showAction('create', id)} />}
+          {page === 'connections' && <Connections api={api} data={data} refresh={refresh} projectAccess={projectAccess}
+            onOpen={environment => { selectEnvironment(environment.id); navigate('catalog'); }}
+            onChat={environment => openConversation(environment.id, undefined, { unbound: true })} onCreate={id => showAction('create', id)} />}
           {showingEnvironment && selected && !environment && <section className="st-empty"><h2>原环境已不可用</h2>
-            <p>请重新选择数据环境，或从任务详情打开保留的固定结果。</p>
+            <p>请重新选择数据环境，或从任务详情查看保留的结果与证据。</p>
             <button className="st-button" onClick={() => navigate('experiments')}>任务与结果</button></section>}
-          {showingEnvironment && !selected && !environment && <section className="st-empty"><h2>{data.connections.length ? '创建查询环境' : '连接数据，开始探索'}</h2>
-              <p>{data.connections.length ? '选择一个 PostgreSQL 连接，为 Agent 和 SQL 查询创建环境。' : '接入 PostgreSQL 或 Stello 后，可以提问、查询和查看数据目录。'}</p>
+          {showingEnvironment && !selected && !environment && <section className="st-empty"><h2>{data.connections.length ? '启用已保存的连接' : '连接数据库，直接聊数据'}</h2>
+              <p>{data.connections.length ? '选择已有连接，验证后即可在项目对话中查询。' : '接入 PostgreSQL、Neon 或 Stello 后，在普通 DSH 对话中提问。'}</p>
               <button className="st-button st-primary" onClick={() => data.connections.length ? showAction('create') : navigate('connections')}>
-                {data.connections.length ? '创建环境' : '连接数据'}</button>
+                {data.connections.length ? '启用查询' : '连接数据'}</button>
               {pending.length > 0 && <button className="st-button" onClick={() => setOperationsOpen(true)}>查看分支操作</button>}
             </section>}
           {page === 'experiments' && (experimentId ? <ExperimentView key={experimentId} id={experimentId} initial={initialExperiment}
             api={api} refresh={refresh} openConversation={openConversation} openSession={openSession} openEvidence={openEvidence} onBack={() => setExperimentId('')}
             onSql={(target, run) => { setMode('sql'); openEnvironment(target.id, run); }} />
             : <div className="st-stack">
-              <div className="st-page-heading"><h2>任务与结果</h2>
+              <div className="st-page-heading"><div><h2>任务与结果</h2><p className="st-muted">日常分析继续在 DSH 对话中进行。这里查看进度、查询依据和试验结果。</p></div>
                 {pending.length > 0 && <button className="st-button" onClick={() => setOperationsOpen(true)}>分支操作 {pending.length}</button>}
               </div>
               {available.length === 0 ? <section className="st-empty"><h3>为项目接入数据</h3>
-                <p>接入 PostgreSQL 或 Stello 后，可在该项目的 Harness 对话里直接提问。</p>
+                <p>连接 PostgreSQL、Neon 或 Stello 后，可在该项目的普通 DSH 对话里直接提问。</p>
                 <button className="st-button st-primary" onClick={() => navigate('connections')}>管理数据源</button>
               </section> : <section className="st-stack st-task-section" aria-label="近期执行">
                 <h3>近期执行</h3>
@@ -243,10 +245,10 @@ export function Panel({ api, openConversation, openSession, openEvidence, eviden
   </main>;
 }
 
-export function SettingsPage({ api }: { api: Api }) {
+export function SettingsPage({ api, projectAccess }: { api: Api; projectAccess?: ProjectAccess }) {
   const { data, loading, error, refresh } = useSnapshot(api);
   return <div className="st-settings-page">
     {error && <p role="alert" className="st-error">{error}</p>}
-    {loading ? <p className="st-muted">正在读取连接…</p> : <Connections api={api} data={data} refresh={refresh} />}
+    {loading ? <p className="st-muted">正在读取连接…</p> : <Connections api={api} data={data} refresh={refresh} projectAccess={projectAccess} />}
   </div>;
 }

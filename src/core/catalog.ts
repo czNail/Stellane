@@ -12,7 +12,7 @@ const objectKey = (schema: string, table: string) => JSON.stringify([schema,tabl
 type ReadMetadata = (environmentId: string, sql: string, actor: Actor, signal: AbortSignal, purpose: 'context' | 'knowledge') => Promise<Run>;
 type Observation = Omit<CatalogView, 'knowledge'> & { metadata: DatabaseMetadata };
 const notes = ['元数据只覆盖当前 SQL 角色拥有整表 SELECT 权限的用户对象。',
-  '结构指纹不代表数据内容版本。实时库与可写分支仅记录本次观测，分支 forkLsn 是来源位置。',
+  '结构指纹不代表数据内容版本。实时库与可写分支仅记录本次观测，分支来源位置只说明创建基线。',
   '业务说明来自导入文档；适用表示对象结构匹配。SQL 示例作为资料返回，未自动执行。'];
 
 export class SemanticCatalog {
@@ -33,11 +33,12 @@ export class SemanticCatalog {
     const parsed = metadataSchema.safeParse(run.preview?.rows[0]?.metadata);
     if (!parsed.success || run.preview?.truncated || !run.target) throw new Error('元数据不完整或超过上限（64 个对象、每对象 256 个字段、128 KiB），未生成上下文。');
     const metadata = parsed.data; const environment = this.environment(environmentId);
-    const dataSourceId = environment.stello?.providerId ?? environment.connectionId!;
+    const dataSourceId = environment.stello?.providerId ?? environment.neon?.providerId ?? environment.connectionId!;
     let root = environment;
     for (let depth=0; root.parentEnvironmentId && depth<16; depth++) root=this.environment(root.parentEnvironmentId);
     const sourceFingerprint = hash(environment.stello
       ? [dataSourceId,root.stello?.identity,root.stello?.resourceId]
+      : environment.neon ? [dataSourceId,root.neon?.projectId,root.neon?.branchId,root.neon?.createdAt,root.neon?.lastResetAt]
       : [dataSourceId,run.target,metadata.databaseOid]);
     const definitions = this.store.definitions(environment.projectPath,dataSourceId);
     const latest = new Map<string,SemanticDefinition>();
@@ -54,9 +55,12 @@ export class SemanticCatalog {
     const context: ContextRecord = { id:randomUUID(),environmentId,projectPath:environment.projectPath,dataSourceId,sourceFingerprint,
       schemaFingerprint:hash(metadata.relations),catalogFingerprint:hash([...latest.values()].sort((a,b)=>a.key.localeCompare(b.key)).map(item=>[item.id,item.version])),runId:run.id,
       state:{ environmentId,dataSourceId,mode:environment.mode,target:run.target,databaseOid:metadata.databaseOid,
-        observedAt:run.finishedAt!,branch:run.branch,identityBasis:environment.stello?'stello-resource':'registration-and-target',
+        observedAt:run.finishedAt!,branch:run.branch,neon:run.neon,
+        identityBasis:environment.stello?'stello-resource':environment.neon?'neon-branch':'registration-and-target',
         dataVersion:environment.mode==='fixed' && run.branch ? {kind:'fixed-position',snapshot:metadata.snapshot,position:run.branch.forkLsn} : {kind:'observation',snapshot:metadata.snapshot} } };
-    this.store.put('contexts',context); return { context,relations:metadata.relations,versions,notes,metadata };
+    const observationNotes = environment.neon ? [...notes,
+      'Neon 保留的只读分支由 Stellane 限制写入，账户管理员仍可改变分支。历史关系使用前需要重新核对。'] : notes;
+    this.store.put('contexts',context); return { context,relations:metadata.relations,versions,notes:observationNotes,metadata };
   }
   async view(environmentId: string, actor: Actor, signal: AbortSignal): Promise<CatalogView> {
     if (actor.kind !== 'user') throw new Error('完整目录与历史仅供用户查看。');

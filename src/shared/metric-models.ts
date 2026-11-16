@@ -35,5 +35,7 @@ export interface MetricEvidence {
     totalAmount: string; attributedAmount: string; unattributedAmount: string;
   };
   checks?: MetricCheck[];
+  /** The relationship checks cover supported ordinary tables in this query. */
+  relationChecksValid?: boolean;
   reason?: string;
 }

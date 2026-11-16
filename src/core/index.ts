@@ -5,12 +5,15 @@ import { connectionInput, deliverInput, deriveInput, environmentInput, experimen
 import type { Actor, BranchBinding, BranchOperation, Connection, DatabaseTarget, DeliveredResult, Delivery, Environment, Experiment, ExperimentDetail, ExperimentInput, QueryInput, Run, Snapshot, StelloSource } from '../shared/models.ts';
 import { PostgresProvider, WriteOutcomeError, type QueryProvider } from '../providers/postgres.ts';
 import { StelloProvider } from '../providers/stello.ts';
+import { NeonCreationRejectedError, NeonProvider } from '../providers/neon.ts';
+import { neonInput, type NeonBinding, type NeonSource } from '../shared/neon-models.ts';
 import { Store } from './store.ts';
 import { SemanticCatalog } from './catalog.ts';
 import type { CatalogView, ContextResult, SemanticDefinition } from '../shared/context-models.ts';
 import type { LearnResult } from '../shared/knowledge-models.ts';
 import { metricInput, type MetricPlan } from '../shared/metric-models.ts';
 import { metricSql, withMetric } from './metric.ts';
+import { prepareNeonConnection, preparePostgresConnection } from './onboarding.ts';
 
 const owner: Actor = { kind: 'user', id: 'owner' };
 
@@ -30,15 +33,18 @@ export class StellaneCore {
   private readonly activeRuns = new Map<string, Set<string>>();
   private readonly provider: QueryProvider;
   private readonly branches: StelloProvider;
+  private readonly neon: NeonProvider;
   private readonly catalog: SemanticCatalog;
-  constructor(directory: string, provider: QueryProvider = new PostgresProvider(), branches: StelloProvider = new StelloProvider()) {
-    this.provider = provider; this.branches = branches; this.store = new Store(directory);
+  private readonly directory: string;
+  constructor(directory: string, provider: QueryProvider = new PostgresProvider(), branches: StelloProvider = new StelloProvider(), neon = new NeonProvider()) {
+    this.directory = directory;
+    this.provider = provider; this.branches = branches; this.neon = neon; this.store = new Store(directory);
     this.catalog = new SemanticCatalog(this.store,id=>this.environment(id),
       (environmentId, sql, actor, signal, purpose) => this.run(queryInput.parse({ environmentId, sql }), actor, signal, false, purpose));
   }
   snapshot(): Snapshot {
     return { connections: this.store.list('connections'), environments: this.store.environments(),
-      runs: this.store.list('runs', 100), providers: this.store.list('providers'),
+      runs: this.store.list('runs', 100), providers: this.store.list('providers'), neonSources: this.store.list('neonSources'),
       operations: this.store.list('operations', 100), deliveries: this.store.list('deliveries', 100), experiments: this.store.list('experiments') };
   }
   private async project(path: string): Promise<string> {
@@ -57,6 +63,30 @@ export class StellaneCore {
     this.store.put('connections', connection);
     return connection;
   }
+  connectPostgres(value: unknown, signal?: AbortSignal): Promise<Environment> {
+    return this.track(async signal => {
+      const prepared = await preparePostgresConnection(this.directory, value);
+      try {
+        const projectPath = await this.project(prepared.connection.projectPath);
+        this.capacity(projectPath);
+        await this.provider.probe(prepared.connection, signal);
+        signal.throwIfAborted();
+        this.capacity(projectPath);
+        const connection: Connection = { ...prepared.connection, projectPath, id: randomUUID(), createdAt: new Date().toISOString() };
+        const environment: Environment = { id: randomUUID(), connectionId: connection.id, name: connection.name,
+          projectPath, mode: 'live', access: 'read-only', createdAt: connection.createdAt };
+        this.store.transaction(() => {
+          this.store.put('connections', connection); this.store.put('environments', environment);
+        });
+        return environment;
+      } catch (error) { await prepared.discard(); throw error; }
+    }, signal);
+  }
+  async connectNeon(value: unknown, signal?: AbortSignal): Promise<Environment> {
+    const prepared = await prepareNeonConnection(this.directory, value);
+    try { return await this.saveNeon(prepared.source, signal, prepared.expectedHost); }
+    catch (error) { await prepared.discard(); throw error; }
+  }
   saveStello(value: unknown, signal?: AbortSignal): Promise<Environment> {
     const input = stelloInput.parse(value);
     return this.track(async signal => {
@@ -70,6 +100,27 @@ export class StellaneCore {
         mode: observed.mode === 'fixed' ? 'fixed' : 'live', access: 'read-only', createdAt: source.createdAt,
         stello: this.branches.binding(source, source.resource, observed, false) };
       this.store.put('providers', source); this.store.put('environments', environment);
+      return environment;
+    }, signal);
+  }
+  saveNeon(value: unknown, signal?: AbortSignal, expectedHost?: string): Promise<Environment> {
+    const input = neonInput.parse(value);
+    return this.track(async signal => {
+      const projectPath = await this.project(input.projectPath);
+      this.capacity(projectPath);
+      const source: NeonSource = { ...input, projectPath, id: randomUUID(), createdAt: new Date().toISOString() };
+      const binding = await this.neon.sourceBinding(source, signal, expectedHost);
+      const connection = await this.neon.connect(source, binding, signal);
+      if (expectedHost && connection.host !== expectedHost) {
+        throw new Error('连接地址与 Neon 项目或分支不一致，请从同一个分支复制连接信息。');
+      }
+      const environment: Environment = { id: randomUUID(), name: source.name, projectPath,
+        mode: 'live', access: 'read-only', createdAt: source.createdAt, neon: binding };
+      await this.neon.sql.query(connection, { environmentId: environment.id, sql: 'SELECT 1 AS connected', values: [] }, signal);
+      this.capacity(projectPath);
+      this.store.transaction(() => {
+        this.store.put('neonSources', source); this.store.put('environments', environment);
+      });
       return environment;
     }, signal);
   }
@@ -98,7 +149,8 @@ export class StellaneCore {
         throw new Error('当前 Agent 无权使用这个数据环境。');
       }
     }
-    if (environment.removedAt) throw new Error('该分支已清理，请打开保留的固定结果。');
+    if (environment.removedAt) throw new Error(environment.retainedReason
+      ? '该分支已清理计算资源并结束访问，请打开保留的结果。' : '该分支已清理，请打开保留的结果。');
     return environment;
   }
   private agentCanUse(environment: Environment, actor: Actor): boolean {
@@ -174,10 +226,28 @@ export class StellaneCore {
       return this.evaluateMetric(environment, { ...spec, relationships }, actor, signal);
     }, signal);
   }
-  private evaluateMetric(environment: Environment, plan: MetricPlan, actor: Actor, signal: AbortSignal): Promise<Run> {
-    return this.runOn(environment, {
+  private async evaluateMetric(environment: Environment, plan: MetricPlan, actor: Actor, signal: AbortSignal): Promise<Run> {
+    const run = await this.runOn(environment, {
       environmentId: environment.id, sql: metricSql(plan), values: plan.filter ? [plan.filter.value] : [],
     }, actor, signal, false, undefined, plan);
+    if (run.status === 'succeeded' && run.metric?.relationChecksValid && run.metric.snapshot) {
+      for (const [index, relationship] of plan.relationships.entries()) {
+        const check = run.metric.checks?.[index];
+        if (!check || check.missing === '0' && check.ambiguous === '0' && check.nullSourceKeys === '0') continue;
+        const record = this.store.find('knowledge', relationship.id);
+        // A branch's counterexample never invalidates the original source's
+        // observation, and an older query cannot overwrite a newer check.
+        if (!record || record.environmentId !== environment.id || record.version !== relationship.version
+          || record.fact.kind !== 'join' || record.evidence.observedAt > run.startedAt
+          || (record.invalidation && record.invalidation.evidence.observedAt > run.startedAt)) continue;
+        const scope = `指标「${plan.name}」的统计范围${plan.filter ? `（${plan.filter.column} = ${JSON.stringify(plan.filter.value)}）` : ''}`;
+        const reason = `${scope}内有 ${check.missing} 条记录未匹配、${check.ambiguous} 条记录存在多个候选匹配，旧的完整关联已失效。`;
+        this.store.put('knowledge', { ...record, invalidation: { reason, scope, unmatchedRows: check.missing,
+          evidence: { contextId: record.evidence.contextId, runId: run.id, observedAt: run.finishedAt!,
+            method: 'metric-coverage', snapshot: run.metric.snapshot } } });
+      }
+    }
+    return run;
   }
   write(value: unknown, actor: Actor, signal?: AbortSignal): Promise<Run> {
     return this.track(signal => this.run(queryInput.parse(value), actor, signal, true), signal);
@@ -214,8 +284,8 @@ export class StellaneCore {
       }
       if (write && this.modifying.has(experiment.id)) throw new Error('任务正在固定结果或清理，请稍后写入。');
     }
-    if (write && (environment.access !== 'read-write' || !environment.stello?.managed)) {
-      throw new Error('只能写入 Stellane 派生的可写分支；来源库、固定切面和普通 PG 环境保持只读。');
+    if (write && (environment.access !== 'read-write' || !(environment.stello?.managed || environment.neon?.managed))) {
+      throw new Error('只能写入 Stellane 派生的可写分支。来源库和保留的只读结果无法写入。');
     }
     const digest = write ? createHash('sha256').update(JSON.stringify(input)).digest('hex') : undefined;
     const id = write ? invocationId(actor, 'execute') : randomUUID();
@@ -246,6 +316,14 @@ export class StellaneCore {
         preview = write
           ? await this.branches.sql.execute(connection, input, { runId: run.id, digest: run.digest! }, signal)
           : await this.branches.sql.query(connection, input, signal);
+      } else if (environment.neon) {
+        const source = this.store.get('neonSources', environment.neon.providerId);
+        const connection = await this.neon.connect(source, environment.neon, signal);
+        run.neon = environment.neon;
+        this.store.put('runs', run);
+        preview = write
+          ? await this.neon.sql.execute(connection, input, { runId: run.id, digest: run.digest! }, signal)
+          : await this.neon.sql.query(connection, input, signal);
       } else {
         preview = await this.provider.query(this.store.get('connections', environment.connectionId!), input, signal);
       }
@@ -270,11 +348,11 @@ export class StellaneCore {
   private async deriveWork(kind: 'checkpoint' | 'fork', input: { environmentId: string; name: string }, actor: Actor, signal: AbortSignal,
     intent?: string, experimentId?: string): Promise<Environment> {
     const parent = await this.authorize(input.environmentId, actor);
-    if (!parent.stello) throw new Error('当前数据库没有分支能力，请先登记 Stello 来源。');
+    if (!parent.stello && !parent.neon) throw new Error('当前连接没有分支能力，可用于查询、血缘和记忆。独立写入实验需要启用 Neon 或 Stello 分支连接。');
     if (parent.experimentId && parent.experimentId !== experimentId) throw new Error('请在任务详情操作这个分支。');
     if (actor.kind === 'agent' && this.store.find('scopes', actor.id)) throw new Error('请从工作台发起独立实验。');
-    if (kind === 'fork' && parent.mode !== 'fixed') throw new Error('请先固定父环境状态，再从同一切面派生方案。');
-    if (kind === 'checkpoint' && parent.mode === 'fixed') throw new Error('这个环境已经是固定切面，可以直接派生。');
+    if (kind === 'fork' && parent.mode !== 'fixed') throw new Error('请先保存父环境的只读基线，再从同一基线派生方案。');
+    if (kind === 'checkpoint' && parent.mode === 'fixed') throw new Error('这个环境已经是只读基线，可以直接派生。');
     const id = invocationId(actor, kind);
     const inputDigest = createHash('sha256').update(JSON.stringify([parent.id, input.name, kind, intent ?? null])).digest('hex');
     const existing = this.store.find('operations', id);
@@ -283,37 +361,49 @@ export class StellaneCore {
         || (existing.inputDigest && existing.inputDigest !== inputDigest)) throw new Error('原调用标识已关联其他派生请求。');
       if (existing.status === 'succeeded') return this.environment(existing.environment.id);
       if (experimentId && existing.status === 'unknown' && existing.request) {
-        const source = this.store.get('providers', existing.providerId);
-        return this.finishBranch(existing, await this.branches.resumeCreation(source, existing, signal));
+        const binding = existing.providerKind === 'neon'
+          ? await this.neon.resumeCreation(this.store.get('neonSources', existing.providerId), existing, signal)
+          : await this.branches.resumeCreation(this.store.get('providers', existing.providerId), existing, signal);
+        return this.finishBranch(existing, binding);
       }
-      if (!(experimentId && existing.status === 'failed' && !existing.request)) {
+      if (!(experimentId && existing.status === 'failed' && (!existing.request || existing.rejectedAttempts?.length))) {
         throw new Error(`原派生操作 ${id} 尚未确认，请核对原分支。`);
       }
     }
     this.capacity(parent.projectPath);
     const release = kind === 'checkpoint' ? this.lock(parent.id) : () => {};
-    const source = this.store.get('providers', parent.stello.providerId);
+    const providerId = parent.neon?.providerId ?? parent.stello!.providerId;
     const environment: Environment = existing?.environment ?? { id: randomUUID(), name: input.name, projectPath: parent.projectPath,
       mode: kind === 'checkpoint' ? 'fixed' : 'branch', access: kind === 'checkpoint' ? 'read-only' : 'read-write',
       createdAt: new Date().toISOString(), parentEnvironmentId: parent.id, experimentId };
-    const operation: BranchOperation = { id, kind, providerId: source.id, parentEnvironmentId: parent.id,
-      resource: `${parent.stello.resource.split('/')[0]}/sl-${id.replaceAll('-', '').slice(0, 20)}`,
+    const operation: BranchOperation = { id, kind, providerId, parentEnvironmentId: parent.id,
+      ...(parent.neon ? { providerKind: 'neon' as const } : {}),
+      resource: parent.neon ? `stellane-${id}` : `${parent.stello!.resource.split('/')[0]}/sl-${id.replaceAll('-', '').slice(0, 20)}`,
       actor: { ...actor }, environment, inputDigest, status: 'pending', createdAt: environment.createdAt };
+    if (existing?.rejectedAttempts) operation.rejectedAttempts = existing.rejectedAttempts;
     this.store.put('operations', operation);
     try {
-      const binding = await this.branches.create(source, parent.stello, operation, request => {
+      const prepared = (request: Record<string, unknown>) => {
         operation.request = request; this.store.put('operations', operation);
-      }, signal);
+      };
+      const binding = parent.neon
+        ? await this.neon.create(this.store.get('neonSources', providerId), parent.neon, operation, prepared, signal)
+        : await this.branches.create(this.store.get('providers', providerId), parent.stello!, operation, prepared, signal);
       return this.finishBranch(operation, binding);
     } catch (error) {
-      operation.status = operation.request ? 'unknown' : 'failed';
+      operation.status = error instanceof NeonCreationRejectedError ? 'failed' : operation.request ? 'unknown' : 'failed';
+      if (error instanceof NeonCreationRejectedError && operation.request) {
+        operation.rejectedAttempts = [...(operation.rejectedAttempts ?? []),
+          { status: error.status, at: new Date().toISOString(), request: structuredClone(operation.request) }];
+      }
       operation.error = error instanceof Error ? error.message : '派生未确认。';
       this.store.put('operations', operation);
       throw new Error(`${operation.error} 操作记录：${operation.id}`, { cause: error });
     } finally { release(); }
   }
-  private finishBranch(operation: BranchOperation, binding: BranchBinding): Environment {
-    const environment = { ...operation.environment, stello: binding };
+  private finishBranch(operation: BranchOperation, binding: BranchBinding | NeonBinding): Environment {
+    const environment: Environment = { ...operation.environment,
+      ...('branchId' in binding ? { neon: binding } : { stello: binding }) };
     this.store.transaction(() => {
       this.store.put('environments', environment);
       this.store.put('operations', { ...operation, environment, status: 'succeeded', error: undefined });
@@ -326,7 +416,9 @@ export class StellaneCore {
       await this.authorize(operation.parentEnvironmentId, actor);
       if (operation.environment.experimentId) throw new Error('请在任务详情核对这次派生。');
       if (operation.status === 'succeeded' || operation.status === 'failed') return operation;
-      const binding = await this.branches.reconcile(this.store.get('providers', operation.providerId), operation, signal);
+      const binding = operation.providerKind === 'neon'
+        ? await this.neon.reconcile(this.store.get('neonSources', operation.providerId), operation, signal)
+        : await this.branches.reconcile(this.store.get('providers', operation.providerId), operation, signal);
       if (binding) this.finishBranch(operation, binding);
       return this.store.get('operations', id);
     }, signal);
@@ -335,9 +427,12 @@ export class StellaneCore {
     return this.track(async signal => {
       const run = this.store.get('runs', id);
       const environment = await this.authorize(run.environmentId, actor);
-      if (run.kind !== 'execute' || run.status !== 'unknown' || !run.digest || !environment.stello) return run;
-      const connection = await this.branches.connect(this.store.get('providers', environment.stello.providerId), environment.stello, signal);
-      const preview = await this.branches.sql.receipt(connection, environment.id, run.id, run.digest, signal);
+      if (run.kind !== 'execute' || run.status !== 'unknown' || !run.digest || (!environment.stello && !environment.neon)) return run;
+      const connection = environment.neon
+        ? await this.neon.connect(this.store.get('neonSources', environment.neon.providerId), environment.neon, signal)
+        : await this.branches.connect(this.store.get('providers', environment.stello!.providerId), environment.stello!, signal);
+      const sql = environment.neon ? this.neon.sql : this.branches.sql;
+      const preview = await sql.receipt(connection, environment.id, run.id, run.digest, signal);
       const checked: Run = preview ? { ...run, status: 'succeeded', preview, target: preview.target, error: undefined }
         : { ...run, error: '尚未找到匹配的提交回执，结果继续标为未知；SQL 未重放。' };
       this.store.put('runs', checked);
@@ -366,7 +461,7 @@ export class StellaneCore {
       }
       const environment = await this.deriveWork('checkpoint', { environmentId: source.id, name: `${source.name.slice(0, 70)} · 交付` }, actor, signal, JSON.stringify(input));
       const run = await this.run(queryInput.parse({ environmentId: environment.id, sql: input.sql }), actor, signal, false);
-      if (run.status !== 'succeeded') throw new Error(`交付切面已保留，但证据查询未成功：${run.error ?? run.status}`);
+      if (run.status !== 'succeeded') throw new Error(`交付结果已保留，但证据查询未成功：${run.error ?? run.status}`);
       const delivery: Delivery = { id, sourceEnvironmentId: source.id, recipientEnvironmentId: recipient.id,
         snapshotEnvironmentId: environment.id, runId: run.id, summary: input.summary, actor: { ...actor },
         projectPath: source.projectPath, createdAt: new Date().toISOString() };
@@ -413,7 +508,7 @@ export class StellaneCore {
       const source = await this.authorize(input.environmentId, actor);
       const sessionId = actor.id;
       if (source.mode === 'branch' || this.store.find('scopes', sessionId)) {
-        throw new Error('请在普通项目对话中选择 Stello 来源或固定基线创建实验。');
+        throw new Error('请在普通项目对话中选择 Neon、Stello 来源或已保留的基线创建实验。');
       }
       const id = invocationId(actor, 'start-experiment');
       const saved = this.store.find('experiments', id)
@@ -427,7 +522,7 @@ export class StellaneCore {
   }
   private async prepareExperiment(input: ExperimentInput, signal: AbortSignal, sessionId?: string): Promise<ExperimentDetail> {
     const source = this.environment(input.environmentId);
-    if (!source.stello || source.experimentId || source.removedAt) throw new Error('请选择可用于实验的 Stello 来源或固定基线。');
+    if ((!source.stello && !source.neon) || source.experimentId || source.removedAt) throw new Error('请选择已启用分支的 Neon 或 Stello 来源。PostgreSQL 连接可直接用于查询、血缘和记忆。');
     const saved = this.store.find('experiments', input.id);
     const metricRunId = input.metricRunId ?? saved?.metricRunId;
     const metricRun = metricRunId ? this.store.find('runs', metricRunId) : undefined;
@@ -450,7 +545,7 @@ export class StellaneCore {
       this.store.put('experiments', experiment);
       if (metricRun?.metric && !experiment.baselineMetricRunId) {
         const baselineMetric = await this.evaluateMetric(baseline, metricRun.metric.plan, actor, signal);
-        if (baselineMetric.status !== 'succeeded' || !baselineMetric.metric?.counts) throw new Error('未能核对固定基线上的指标，请核对后重试。');
+        if (baselineMetric.status !== 'succeeded' || !baselineMetric.metric?.counts) throw new Error('未能核对基线上的指标，请核对后重试。');
         experiment.baselineMetricRunId = baselineMetric.id;
         this.store.put('experiments', experiment);
       }
@@ -476,13 +571,15 @@ export class StellaneCore {
         experiment.evidence = { summary, sql: plan ? metricSql(plan) : sql!, values: plan ? (plan.filter ? [plan.filter.value] : []) : values };
         this.store.put('experiments', experiment);
         const result = experiment.resultId ? this.environment(experiment.resultId)
-          : await this.deriveWork('checkpoint', { environmentId: workId, name: '固定结果' }, lifecycleActor, signal, undefined, id);
+          : await this.deriveWork('checkpoint', { environmentId: workId,
+            name: this.environment(workId).neon ? '保留的只读结果' : '固定结果' }, lifecycleActor, signal, undefined, id);
         experiment.resultId = result.id;
         this.store.put('experiments', experiment);
         const run = plan ? await this.evaluateMetric(result, plan, actor, signal)
           : await this.runOn(result, queryInput.parse({ environmentId: result.id, sql, values }), actor, signal, false);
-        if (run.status !== 'succeeded') throw new Error(`切面已保存。请在原切面补查证据。${run.error ?? ''}`);
-        if (plan && !run.metric?.counts) throw new Error('切面已保存，尚未取得指标覆盖证据。');
+        if (run.status !== 'succeeded') throw new Error(result.neon
+          ? `结果分支已保留。请在原分支补查证据。${run.error ?? ''}` : `切面已保存。请在原切面补查证据。${run.error ?? ''}`);
+        if (plan && !run.metric?.counts) throw new Error('结果已保留，尚未取得指标覆盖证据。');
         const delivery: Delivery = { id, sourceEnvironmentId: workId, recipientEnvironmentId: experiment.sourceId,
           snapshotEnvironmentId: result.id, runId: run.id, summary, actor, projectPath: experiment.projectPath, createdAt: new Date().toISOString() };
         experiment.deliveryId = delivery.id;
@@ -498,7 +595,8 @@ export class StellaneCore {
       await this.authorizeExperiment(id, actor);
       const experiment = this.store.get('experiments', id);
       if (experiment.status === 'closed') return this.experimentDetail(id);
-      if (actor.kind === 'agent' && !experiment.deliveryId) throw new Error('请先固定并交付证据，再清理实验。');
+      if (actor.kind === 'agent' && !experiment.deliveryId) throw new Error(this.environment(experiment.sourceId).neon
+        ? '请先保存并交付证据，再结束实验。' : '请先固定并交付证据，再清理实验。');
       const lifecycleActor: Actor = { ...owner, callId: id };
       const baselineOp = this.store.find('operations', invocationId(lifecycleActor, 'checkpoint'));
       const workOp = this.store.find('operations', invocationId(lifecycleActor, 'fork'));
@@ -506,7 +604,7 @@ export class StellaneCore {
         throw new Error('请先核对未完成的分支派生。');
       }
       const resultOp = this.store.find('operations', invocationId({ ...lifecycleActor, callId: `${id}:result` }, 'checkpoint'));
-      if (resultOp?.status === 'unknown' || resultOp?.status === 'pending') throw new Error('请先在交付入口核对未完成的固定切面。');
+      if (resultOp?.status === 'unknown' || resultOp?.status === 'pending') throw new Error('请先在交付入口核对未完成的只读结果。');
       const resourceId = (saved: string | undefined, operation: BranchOperation | undefined) =>
         saved ?? (operation?.status === 'succeeded' ? operation.environment.id : undefined);
       const workId = resourceId(experiment.workId, workOp);
@@ -524,12 +622,23 @@ export class StellaneCore {
         experiment.status = 'closing';
         this.store.put('experiments', experiment);
         for (const environment of owned) {
-          if (!environment.stello?.managed) throw new Error('没有可核对的任务分支身份。');
           const environmentId = environment.id;
-          const source = this.store.get('providers', environment.stello.providerId);
-          await this.branches.remove(source, environment.stello, environmentId, this.store.find('removals', environmentId),
-            removal => this.store.put('removals', removal), signal);
-          this.store.put('environments', { ...environment, removedAt: new Date().toISOString() });
+          if (environment.neon?.managed) {
+            const source = this.store.get('neonSources', environment.neon.providerId);
+            // Neon cannot delete parents of a retained result. Remove their computes
+            // and revoke local access while keeping the dependency chain explicit.
+            const retain = !!experiment.deliveryId;
+            await this.neon.remove(source, environment.neon, environmentId, this.store.find('neonRemovals', environmentId),
+              removal => this.store.put('neonRemovals', removal), signal, retain ? 'compute' : 'branch');
+            const retainedReason = retain ? 'Neon 结果依赖此父分支。compute 已移除，访问已结束；存储仍保留，可能继续产生费用。' : undefined;
+            this.store.put('environments', { ...environment, removedAt: new Date().toISOString(), retainedReason });
+            if (retainedReason) experiment.retentionNote = retainedReason;
+          } else if (environment.stello?.managed) {
+            const source = this.store.get('providers', environment.stello.providerId);
+            await this.branches.remove(source, environment.stello, environmentId, this.store.find('removals', environmentId),
+              removal => this.store.put('removals', removal), signal);
+            this.store.put('environments', { ...environment, removedAt: new Date().toISOString() });
+          } else throw new Error('没有可核对的任务分支身份。');
         }
         experiment.status = 'closed';
       });

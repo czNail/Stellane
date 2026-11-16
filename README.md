@@ -1,58 +1,93 @@
 # Stellane
 
-Agent Data Context for SQL agents.
+**Ask questions about your Postgres data in a normal DeepSeek Harness chat. Keep the evidence and reuse what the Agent learns.**
 
-Stellane 为 SQL Agent 提供统一的数据上下文：理解业务语义，复用有证据的探索经验，在独立的数据分支中验证假设，并判断已有知识是否仍适用于当前数据。
+Stellane is a DeepSeek Harness plugin. It gives the Agent access to your database's tables, definitions and relationships, saves verified discoveries, and checks them again when the data can change. The side panel shows the SQL, sources, saved relationships and experiment results behind an answer.
 
-**Agent 负责理解、推理、编写 SQL 和决策；Stellane 负责语义、记忆、数据状态与使用范围。**
+[中文说明](README.zh-CN.md) · [Product decisions](PRODUCT.md) · [Development and testing](DEVELOPMENT.md)
 
-## 当前进度
+## What it helps with
 
-已实现语义目录和探索记忆初版。Agent 可以检索业务说明、视图上游，以及探索发现的行粒度和隐性关联。也支持通用只读 SQL、Stello 固定与派生、分支内写入、固定结果交付和未知操作核对。
+- **Understand unfamiliar data.** Read table and column descriptions, declared relationships and view dependencies. Add business definitions when names alone are not enough.
+- **Avoid rediscovering the same joins.** The Agent proposes a key or relationship; Stellane checks the data before saving it. A later chat can find that observation and recheck it before use. Failed checks preserve the old and new evidence.
+- **Explain an answer.** Open the recorded SQL and data scope from the conversation. Supported cross-table metrics include totals, relationship coverage and unattributed records.
+- **Try a change in isolation.** With Neon branching or Stello, ask for an experiment. The Agent works on its own branch, records the result and ends the experiment without changing the source through Stellane.
 
-视图血缘从数据库目录自动读取。Agent 可提出隐性键或关联，系统用只读 SQL 核对并自动保存。同环境的 Agent 可复用这些发现。实时数据上的发现会标注观测范围，并在使用前核对。产品范围见[产品设计](PRODUCT.md)。
+These features work with your schema. There is no built-in sales, finance or other industry model. The Agent chooses the queries; Stellane checks access, records evidence and manages supported experiments.
 
-## 产品方向
+## Choose your connection
 
-| 能力 | 解决什么问题 |
-| --- | --- |
-| Semantic Catalog · 语义目录 | 表和字段是什么意思、数据如何关联、业务指标怎样计算、哪些 SQL 可以参考 |
-| Agentic Memory · 探索记忆 | 记住行粒度、关联键和基数、数据来源及转换链路，减少重复摸索数据库 |
-| Multi-World Context · 多分支上下文 | 从明确的数据状态派生独立分支，隔离不同假设的修改与结果 |
-| 统一上下文管理 | 将语义、记忆和结果关联到数据对象与版本，检查跨 Agent、任务和分支复用的有效性 |
+| Connection | Queries, definitions, view lineage and relationship memory | Isolated write experiments |
+| --- | --- | --- |
+| PostgreSQL | Yes | Requires a branching provider |
+| Neon connection URL | Yes | Add Neon API access to enable |
+| Neon with API access | Yes | Yes |
+| Stello | Yes | Yes |
 
-探索记忆采用**全自动流程**：提炼发现、验证证据、发布复用、更新与失效。证据不足或不适用于当前数据的内容标为待验证，无需人工批准。
+**A Postgres connection is enough to start.** Docker, Stello and a Neon API key are not needed for analysis or memory. A Neon connection URL works as an ordinary Postgres connection.
 
-## 怎么用
+For experiments, Stello provides fixed data states. Neon provides branches that Stellane treats as read-only baselines and results; an external database administrator can still change them. Neon results can depend on retained parent branches. The panel reports that retention, and the retained resources may incur Neon charges.
 
-目标使用流程：
+## Install from source
 
-1. 连接业务数据库，导入元数据和业务说明，配置数据访问范围。
-2. 向 SQL Agent 提出业务问题。Agent 获取当前环境的业务说明、关联和血缘，自行编写查询。
-3. 需要尝试不同数据状态时，Agent 固定来源并创建独立分支，在各分支中探索、修改和验证。
-4. Agent 提出探索发现。Stellane 验证行粒度或关联，通过后自动共享。
-5. 后续 Agent 检索上下文时，得到适用的内容、来源与有效性说明；数据变化后，相关知识重新验证或失效。
+This is a development version. Use a local checkout; these instructions do not assume a published npm release.
 
-首个接入为 **DeepSeek Harness 本地插件**，Core 在 Host 内运行，面板用于配置、查看数据来源与证据。数据库可位于本地或远端。
-
-## 本地开发
-
-需要 Node.js 24.9+、Corepack、DeepSeek Harness `0.2.2-rc.1`。
+Prerequisites: Node.js **24.9+**, pnpm **11.1.2** through Corepack, and DeepSeek Harness **0.2.2-rc.1** with a working model connection. The panel currently targets Harness Web.
 
 ```sh
+git clone https://github.com/czNail/Stellane.git
+cd Stellane
 corepack pnpm install
 corepack pnpm check
 dsh plugin --profile web add "$PWD"
 ```
 
-重启 Harness Host，执行 `dsh-url` 获取 Web 地址。打开 **Stellane → 数据源**，为项目添加 PostgreSQL 或 Stello 环境。然后在同一项目中打开任意普通 Harness 对话，直接问业务数据或血缘。插件会提示 Agent 按需加载 `stellane-data` Skill、确认可用环境、查阅语义目录并执行只读查询。多个来源都可能匹配时，在对话里指定来源。
+Restart the Harness Web Host after installing the plugin. If you start it from a terminal, stop the existing process and run:
 
-打开 Stellane 默认进入 **任务与结果**，可查看近期查询的状态、SQL 和执行证据，以及实验和固定交付。需要手动执行 SQL 或绑定某个环境提问时，进入 **探索**。
+```sh
+dsh web
+```
 
-项目接入 Stello 后，也可在普通对话里直接说「试算把本月手续费改为 2% 后的净收入」。Agent 会固定基线、在独立工作分支验证并交付只读证据。交付后默认清理临时分支并保留结果。在 **任务与结果** 可以实时查看进度、SQL、固定切面，也可以返回原对话。需要手动开实验时，在 **探索** 选中 Stello 环境后选择 **开始实验**。
+Harness opens the browser and prints its address. For a remote Host, use `dsh web --no-open` and your existing way of accessing that Host. Install the plugin in the same profile you run.
 
-在 **数据目录** 查阅表与字段、业务说明及关系与血缘。可填写业务口径或导入 JSON。让 Agent 调查「这两张表怎么关联？」后，已保存的发现可在 **关系与血缘** 查看。
+## Connect once, then chat
 
-跨表正式指标可通过 `stellane_metric` 使用已保存的关系链。Core 在一次数据库快照里计算分组、汇总和关联覆盖。对话的「查看证据」可打开口径版本、未归因数量与各段匹配核对。从 Stello 上的异常指标可「试算修复」，任务按原口径比较固定基线和固定结果，保留两边的执行证据。
+1. Open **Stellane → 数据源 (Data sources) → 添加数据源 (Add data source)**.
+2. Select PostgreSQL or Neon, paste the connection URL and confirm the project directory. The current Harness project is filled in when available; the name defaults to the database name. The database itself may be remote.
+3. Click **连接并开始使用 (Connect and start)**. Stellane tests the connection, stores credentials in a private file on the Host, and creates a read-only environment.
+4. Open a normal chat in that project and ask a question. The bundled `stellane-data` Skill guides the Agent to the connected data; no separate Stellane chat is required.
 
-语义适用性目前按数据源和整表元信息检查，SQL 示例不会自动执行；结构指纹也不代表实时数据内容不变。文档格式、独立数据库部署和测试见[开发说明](DEVELOPMENT.md)。
+Example prompts — replace the object names with your own:
+
+> What tables are available, and how are they related?
+>
+> Count events by region. Check the join and show records that cannot be attributed.
+>
+> In a new chat: calculate another metric using the relationship we found. Verify that it still holds.
+
+Multiple relevant sources? Name the one to use in the conversation. Business definitions are optional; add them under **数据目录 (Data catalog)** when a term needs an agreed meaning.
+
+For a Neon experiment, select **启用独立试验 (Enable isolated experiments)** when adding the Neon source and provide its project ID, branch ID and API key. For Stello, use its exported client configuration and source branch. Then ask in ordinary chat:
+
+> In an isolated branch, apply this proposed mapping and compare the result with the baseline. Keep the evidence.
+
+## Where to look
+
+| Panel | Purpose |
+| --- | --- |
+| 任务与结果 · Activity and results | Recent runs, experiment progress, evidence and results. Return to the original conversation. |
+| 数据目录 · Data catalog | Tables, definitions, view lineage and saved relationship observations, including failed rechecks. |
+| 探索 · SQL exploration | Run SQL manually or open a conversation bound to a specific environment. |
+| 数据源 · Data sources | Add connections and see which capabilities each provides. |
+
+You can stay in chat for daily work. Open the panel when you want to inspect or manage what happened.
+
+## Current scope
+
+- Memory covers verified row keys and equality joins. View lineage comes from Postgres metadata. It does not yet model every output-column transformation or external ETL job.
+- Saved data matches are observations, not proof of business meaning. Live data and Neon branches require fresh checks before reuse; Stellane does not continuously watch external writes.
+- Structured metrics support a chain of equality joins, grouped row counts, optional numeric sums and one equality filter. Other calculations use ordinary read-only SQL with their own execution evidence.
+- Source connections are read-only through Stellane. Writes are restricted to plugin-created experiment branches. Use a database role with the access you want to grant.
+- State and evidence live on one Harness Host. Distributed hosting and a general multi-Agent experiment scheduler are outside the current scope.
+
+PostgreSQL and Stello have real-database integration tests. Neon branching is experimental: its API contract tests pass, but cloud end-to-end validation has not yet been run. An opt-in `test:neon:live` suite is available for a dedicated Neon test project. See [the test guide](DEVELOPMENT.md#检查与验收) for requirements and coverage.

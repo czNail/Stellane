@@ -1,0 +1,92 @@
+{
+  "source": "https://neon.com/api_spec/release/v2.json",
+  "retrievedOn": "2026-11-16",
+  "upstreamSha256": "64a2beee00eb38d9fddc61c5ce38552f08ec6655741393924574cebefc322827",
+  "note": "Selected original schema nodes for the request subset used by Stellane. This is an API contract fixture, not a live cloud validation.",
+  "createBranch": {
+    "allOf": [
+      {
+        "$ref": "#/components/schemas/BranchCreateRequest"
+      },
+      {
+        "$ref": "#/components/schemas/AnnotationCreateValueRequest"
+      }
+    ]
+  },
+  "components": {
+    "schemas": {
+      "EndpointType": {
+        "description": "Compute endpoint type. `read_write`: the primary read-write endpoint (one per branch). `read_only`: a read replica endpoint (multiple allowed per branch).",
+        "type": "string",
+        "enum": [
+          "read_only",
+          "read_write"
+        ]
+      },
+      "AnnotationCreateValueRequest": {
+        "type": "object",
+        "x-tags": [
+          "Branch"
+        ],
+        "properties": {
+          "annotation_value": {
+            "$ref": "#/components/schemas/AnnotationValueData"
+          }
+        }
+      },
+      "AnnotationValueData": {
+        "type": "object",
+        "description": "A free-form map of string key-value pairs for attaching metadata to a resource (for example, a git commit reference). Maximum 50 entries.",
+        "x-tags": [
+          "Branch"
+        ],
+        "maxProperties": 50,
+        "additionalProperties": {
+          "type": "string"
+        },
+        "example": {
+          "github-commit-ref": "github-branch-name"
+        }
+      },
+      "BranchCreateRequest": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "description": "The branch name\n",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "parent_id": {
+                "description": "The `branch_id` of the parent branch. If omitted or empty, the branch will be created from the project's default branch.\n",
+                "type": "string",
+                "pattern": "^[a-z0-9-]{1,60}$"
+              }
+            }
+          },
+          "endpoints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BranchCreateRequestEndpointOptions"
+            },
+            "description": "Compute endpoints to create together with the branch. If omitted, the branch is created without any compute endpoint. Endpoints can be added to the branch separately after creation."
+          }
+        }
+      },
+      "BranchCreateRequestEndpointOptions": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/EndpointType"
+          }
+        }
+      }
+    }
+  }
+}

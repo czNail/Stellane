@@ -31,7 +31,8 @@ function relationFor(target: Table, relations: RelationMetadata[]): RelationMeta
 }
 
 function dependencies(context: ContextRecord, relations: RelationMetadata[], tables: Table[]): string {
-  return fingerprint([context.sourceFingerprint, context.state.target, context.state.branch ?? null,
+  const target = context.state.neon ? { database: context.state.target.database, user: context.state.target.user } : context.state.target;
+  return fingerprint([context.sourceFingerprint, target, context.state.neon ?? context.state.branch ?? null,
     context.state.databaseOid, tables.map(table => relationFor(table, relations) ?? null)]);
 }
 
@@ -99,7 +100,7 @@ export class KnowledgeMemory {
         return { ...item, status: 'stale', reason: '相关表的权限或继承范围已变化。' };
       }
       if (record.invalidation) return { ...item, status: 'stale', reason: record.invalidation.reason };
-      return context.state.mode === 'fixed' ? { ...item, status: 'observed' }
+      return context.state.mode === 'fixed' && !context.state.neon ? { ...item, status: 'observed' }
         : { ...item, status: 'needs-check', reason: '这是历史数据观察。数据可变，使用前请重新核对。' };
     });
     return [...declared, ...learned];
@@ -131,6 +132,7 @@ export class KnowledgeMemory {
       const dependencyFingerprint = dependencies(context, initial.relations, tables);
       if (fingerprint(run.target) !== fingerprint(context.state.target)
         || fingerprint(run.branch ?? null) !== fingerprint(context.state.branch ?? null)
+        || fingerprint(run.neon ?? null) !== fingerprint(context.state.neon ?? null)
         || metadata.databaseOid !== context.state.databaseOid
         || dependencyFingerprint !== dependencies(context, metadata.relations, tables)) {
         throw new Error('核对期间数据来源或相关结构发生变化，请重新获取上下文。');

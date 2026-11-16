@@ -6,11 +6,16 @@ import type { BranchOperation, Connection, DatabaseTarget, DeliveredResult, Envi
 import { contextInput, importCatalogInput } from './context-models.ts';
 import type { CatalogView, ContextResult, SemanticDefinition } from './context-models.ts';
 import { metricInput } from './metric-models.ts';
+import { connectPostgresInput, connectNeonInput } from './onboarding-models.ts';
+import { neonInput } from './neon-models.ts';
 
 export const PACKAGE = '@stellane/harness-plugin';
 export const requestSchemas = {
   snapshot: z.strictObject({}),
   saveConnection: connectionInput,
+  connectPostgres: connectPostgresInput,
+  connectNeon: connectNeonInput,
+  saveNeon: neonInput,
   probe: z.strictObject({ connectionId: z.string().uuid() }),
   createEnvironment: environmentInput,
   prepareConversation: z.strictObject({ environmentId: z.string().uuid() }),
@@ -33,6 +38,7 @@ export type Operation = keyof typeof requestSchemas;
 export type Requests = { [K in Operation]: z.input<(typeof requestSchemas)[K]> };
 export interface Responses {
   snapshot: Snapshot; saveConnection: Connection; probe: DatabaseTarget;
+  connectPostgres: Environment; connectNeon: Environment; saveNeon: Environment;
   createEnvironment: Environment; query: Run;
   metric: Run; runEvidence: Run;
   prepareConversation: { workspaceId: string; sessionId?: string };

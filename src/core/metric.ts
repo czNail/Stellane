@@ -88,10 +88,10 @@ export function withMetric(run: Run, plan: MetricPlan): Run {
     return { ...run, preview: undefined, metric: { ...evidence, reason: run.error ?? '查询未取得完整覆盖证据。' } };
   }
   const data = parsed.data;
-  const metric: MetricEvidence = { ...evidence, snapshot: data.snapshot, counts: data.counts, checks: data.checks };
+  const metric: MetricEvidence = { ...evidence, snapshot: data.snapshot, counts: data.counts, checks: data.checks, relationChecksValid: data.safe };
   if (!data.safe) metric.reason = '有参与对象超出可验证的普通表范围。';
   else if (data.checks.some(item => item.ambiguous !== '0')) metric.reason = '在统计范围内存在多个候选匹配，归因需要核实。';
-  else if (data.counts.nullAmounts !== '0') metric.reason = '统计范围内有缺失或无效金额。';
+  else if (data.counts.nullAmounts !== '0') metric.reason = '统计范围内有缺失或无效的求和值。';
   else if (BigInt(data.groupCount) > BigInt(data.groups.length)) metric.reason = '分组数超过可完整交付的范围。';
   else metric.status = data.counts.unattributed === '0' ? 'complete' : 'partial';
   return { ...run, metric, preview: {

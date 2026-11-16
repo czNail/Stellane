@@ -31,10 +31,10 @@ export function MetricComparison({ before, after, openEvidence }: { before: Run;
   }
   return <section className="st-stack st-task-section" aria-label="修复前后指标">
     <h3>修复前后指标</h3>
-    <div className="st-row"><span>固定基线 {beforeCounts.attributed} / {beforeCounts.total} 条已归因</span>
+    <div className="st-row"><span>基线 {beforeCounts.attributed} / {beforeCounts.total} 条已归因</span>
       <button className="st-button" onClick={() => openEvidence(before.id)}>查看基线证据</button></div>
     {after && after.metric && afterCounts && <>
-      <div className="st-row"><span>固定结果 {afterCounts.attributed} / {afterCounts.total} 条已归因 · {metricStatus[after.metric.status]}</span>
+      <div className="st-row"><span>结果 {afterCounts.attributed} / {afterCounts.total} 条已归因 · {metricStatus[after.metric.status]}</span>
         <button className="st-button" onClick={() => openEvidence(after.id)}>查看结果证据</button></div>
       <p>全量记录 {beforeCounts.total} → {afterCounts.total}
         {measurable && <> · 总合计 {beforeCounts.totalAmount} → {afterCounts.totalAmount}</>}

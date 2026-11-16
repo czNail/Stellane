@@ -174,7 +174,7 @@ export function Explore({ api, environment, data, mode, onMode, refresh, openCon
           const run = data.runs.find(item => item.id === delivery.runId);
           if (delivery.snapshotEnvironmentId === environmentId && run) { setSelectedRun(run); setResultView('result'); }
           else onEnvironment(delivery.snapshotEnvironmentId, run);
-        }}>打开固定结果</button>
+        }}>打开已保存结果</button>
       </article>)}</div>}
     </>}
     {error && <p className="st-error" role="alert">{error}</p>}
