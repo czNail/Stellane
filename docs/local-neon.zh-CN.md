@@ -11,7 +11,7 @@
 
 ## 启动并接入
 
-需要 Node.js 24.9+ 与当前用户可用的 Docker。安装预览包后直接运行：
+需要 Node.js 24.9+ 与当前用户可用的 Docker。安装 Stellane 后运行：
 
 ```sh
 dsh plugin --profile web exec stellane-neon start

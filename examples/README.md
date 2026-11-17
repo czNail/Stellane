@@ -19,7 +19,7 @@ Start with demos 1 and 2. Demos 3 and 4 show why Stellane has multiple experimen
 
 ## Prepare a local playground
 
-Install the preview following the main README. Run these commands on the same machine as the Harness Host, with Docker available. No source checkout is needed for these analysis and memory demos. From a source checkout you may replace `dsh plugin --profile web exec stellane-demo` with `corepack pnpm demo` throughout.
+Install Stellane following the main README. Run these commands on the same machine as the Harness Host, with Docker available. No source checkout is needed for these analysis and memory demos. From a source checkout you may replace `dsh plugin --profile web exec stellane-demo` with `corepack pnpm demo` throughout.
 
 ```sh
 dsh plugin --profile web exec stellane-demo start
@@ -169,4 +169,4 @@ For a dedicated PostgreSQL database without Docker, use `psql` to load the chose
 
 Automated dataset verification uses `pnpm test:demo` after `pnpm dev:db`; it checks the published data and Core behavior on real PostgreSQL. `pnpm demo:branches` exercises real provider branches. A deterministic runner and an actual Agent conversation are reported separately. See [development and testing](../DEVELOPMENT.md).
 
-See [the recorded validation scope](../docs/demo-validation.md) for the actual conversations, deterministic checks and recovery limitations, and [independent agent first-use validation](../docs/first-use-validation.md) for the packaged rc.3 walkthrough.
+See [release verification](../docs/release-status.md) for tested workflows.

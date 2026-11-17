@@ -1,8 +1,8 @@
 # 0.1.0 release acceptance
 
-[中文](release-status.zh-CN.md) · [First-use walkthrough](first-use-validation.md) · [Install and maintain](install-and-maintain.md)
+[中文](release-status.zh-CN.md) · [Install and maintain](install-and-maintain.md)
 
-The 0.1 release paths are **PostgreSQL** for read-only analysis, lineage and verified memory, and **Stello** for experiments, saved results and branch cleanup. A Neon PostgreSQL URL can still be used as a read-only data source. Local and cloud Neon branching remain experimental and outside this runtime acceptance scope.
+Stellane 0.1 supports PostgreSQL analysis, lineage and verified relationship memory, plus Stello experiments from a common baseline. Local and cloud Neon branching remain experimental.
 
 | Check | Result |
 | --- | --- |
@@ -13,13 +13,4 @@ The 0.1 release paths are **PostgreSQL** for read-only analysis, lineage and ver
 | Stello in ordinary chat | A real model on rc.3 started an isolated experiment, changed the branch value from 120 to 135, saved SQL evidence in a fixed result, and closed the work. The source stayed at 120. The panel showed the result; management removed only its branch and kept the evidence. |
 | Installation lifecycle | On rc.1, removed the package, installed the published npm preview, explicitly installed the 0.1.0 archive, and restarted with the same source registration intact. |
 
-These results cover a single Host on Linux and scoped synthetic fixtures. The separate first-use walkthrough is an independent-agent test; feedback from outside users and coverage of other operating systems can follow.
-
-## Publish the checked archive
-
-```sh
-corepack pnpm test:package
-sha256sum .stellane-dev/release/stellane-harness-plugin-0.1.0.tgz
-```
-
-The checksum is also recorded in `package-check.json` alongside the archive. Once the commit's CI passes, use the checked archive for npm and the GitHub release attachment. The existing npm preview, `0.3.0-preview.1`, sorts higher than `0.1.0`. Publish 0.1.0 under a non-default tag such as `stable`, test an install, then set the [npm `latest` tag](https://docs.npmjs.com/cli/v11/commands/npm-dist-tag/) to 0.1.0 explicitly. Keep the preview under `next`. Existing preview users can install `@stellane/harness-plugin@0.1.0` explicitly rather than relying on an automatic update to a lower version. Switch the default README install command after publishing.
+Earlier preview walkthroughs checked the synthetic PostgreSQL demo in ordinary DSH chats. A new chat reused the same two verified relationship observations. After data drift, it reported all 5 events and 150 units, including the unattributed event and its 20 units, and linked the failed check to the original observation.

@@ -4,21 +4,19 @@
 
 ## Install Stellane
 
-Use Node.js **24.9+**, a DSH **0.2.2-rc.1–rc.3** Web profile and a working model connection in DSH. The current release candidate is **0.1.0**. Linux is the current real-runtime validation environment; do not assume other platforms have passed the same tests.
-
-Install the earlier preview from npm:
+Use Node.js **24.9+**, DeepSeek Harness Web **0.2.2-rc.1 through rc.3**, and a working DSH model connection. Installation was verified on Linux.
 
 ```sh
-dsh plugin --profile web add @stellane/harness-plugin@0.3.0-preview.1
+dsh plugin --profile web add @stellane/harness-plugin@0.1.0
 ```
 
-For 0.1.0 validation, run `corepack pnpm test:package` in the checkout, then install the generated archive by absolute path. It includes the built Host, client, Skill and demo data.
+To install from an archive, download it from the [GitHub release](https://github.com/czNail/Stellane/releases/tag/v0.1.0) and pass its absolute path.
 
 ```sh
 dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
 ```
 
-Restart the Web Host using that profile, then open **Stellane → Data sources → Add data source**. A normal PostgreSQL URL is enough for analysis, lineage and memory. Check that ordinary DSH chat can reach its model before diagnosing a database connection. Stellane uses that same model configuration.
+Restart the Web Host for that profile, then open **Stellane → Data sources → Add data source**. A PostgreSQL URL is enough for analysis, lineage and memory.
 
 For a synthetic playground with Docker:
 
@@ -55,7 +53,7 @@ Replace the example with a private absolute path writable by the Host user, usin
 
 ## Upgrade and recover
 
-1. Stop the old Host. Early development versions did not enforce ownership or reject newer formats, so they must not run alongside the preview.
+1. Stop the old Host. Early development versions did not enforce ownership or reject newer formats, so they must not share the 0.1 state directory.
 2. Keep a private copy of the complete state directory, including managed credential files. Back up demo/controller data separately if you use it.
 3. Install the new archive in the same profile and restart the Host. Before a format upgrade, Stellane writes a checked SQLite snapshot under `backups/`; it includes committed data still in the WAL. A failed migration preserves the prior format and data.
 4. Check sources, recent evidence and retained branches in **Management** before starting new work.

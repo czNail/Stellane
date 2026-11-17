@@ -31,7 +31,7 @@ Local deletion is logical deletion, **not guaranteed physical erasure**. SQLite 
 
 Credentials supplied by the user through `env:` or external `file:` references are never deleted automatically. Only files recorded as created by Stellane, still in its private credentials directory, and no longer referenced elsewhere are eligible for removal. Updating a password does not revoke the old password at the database; perform server-side rotation using your database's normal controls.
 
-## Scope of the preview
+## Scope of 0.1
 
 The owner panel controls one Host's state. Project/session checks restrict Agent access within that Host; this is not an organization-wide identity system or an audit service immune to a Host administrator. State is not encrypted by Stellane; use your operating system's disk and account protections where needed.
 

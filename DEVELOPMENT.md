@@ -47,7 +47,7 @@ corepack pnpm dev:db stop
 
 ### Neon
 
-普通 Neon PostgreSQL URL 具备查询、目录、血缘和记忆能力，不必配置管理 API。需要独立分支时，预览版优先使用真实的 Docker 开源 Neon 开发环境，不要求云账号或付费资源：
+普通 Neon PostgreSQL URL 具备查询、目录、血缘和记忆能力，不必配置管理 API。0.1 的分支验收使用 Stello。开发者可用实验性的 Docker Neon 环境尝试本地分支：
 
 ```sh
 corepack pnpm dev:neon start
@@ -62,7 +62,7 @@ corepack pnpm dev:neon stop
 
 `pnpm test:neon` 是无外部凭据的 API 契约测试；`test:neon:local` 是真实本地 A/B 与产品清理验收，环境不可用时失败，不会跳过。云端 `test:neon:live` 缺少 `STELLANE_NEON_CONFIG` 时明确跳过，不能当作通过。失败保留原状态、报告和删除意图，先核对原操作，不要重新跑一轮替代恢复。
 
-Neon 云端 API 适配器仍是实验性入口，本预览不要求购买或执行云端验收。如已有专用云测试资源，可自行提供 JSON：`name`、已存在的绝对 `projectPath`、`projectId`、`branchId`、`database`、`user`、`apiKeyRef`（`env:` 或私有 `file:` 引用）。不要设置 `localEndpoint`；显式将此配置交给 `STELLANE_NEON_CONFIG` 才会访问云端。云端会占用相应分支、compute 和存储额度，本地成功不能替代云端验收。
+Neon 云端 API 适配器仍是实验性入口，不属于 0.1 运行验收范围。如已有专用云测试资源，可自行提供 JSON：`name`、已存在的绝对 `projectPath`、`projectId`、`branchId`、`database`、`user`、`apiKeyRef`（`env:` 或私有 `file:` 引用）。不要设置 `localEndpoint`；显式将此配置交给 `STELLANE_NEON_CONFIG` 才会访问云端。云端会占用相应分支、compute 和存储额度，本地成功不能替代云端验收。
 
 ### Stello
 

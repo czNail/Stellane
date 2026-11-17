@@ -6,7 +6,7 @@ Use GitHub's **Security → Report a vulnerability** private reporting option fo
 
 A useful private report includes the affected version, DSH/Node versions, the access an attacker needs, a minimal synthetic reproduction, expected and observed behavior, and the impact. Remove real credentials and private rows. Do not upload a full state database or conversation unless a private channel and scope have been agreed.
 
-The maintained target is the current preview. Do not use older development builds against a newer state directory. See [maintenance](docs/install-and-maintain.md) and [data/privacy boundaries](docs/data-and-privacy.md).
+The maintained target is the 0.1 release. Do not use older development builds against a newer state directory. See [maintenance](docs/install-and-maintain.md) and [data/privacy boundaries](docs/data-and-privacy.md).
 
 ## 中文
 

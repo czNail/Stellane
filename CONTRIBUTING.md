@@ -27,7 +27,7 @@ Neon API contract tests do not require cloud credentials:
 corepack pnpm test:neon
 ```
 
-For real Neon development without cloud charges, use [the Docker setup](docs/local-neon.md). It runs actual open-source services with a Stellane local controller; contract checks, live local-provider checks and DSH chat demonstrations are separate evidence. Cloud API support is experimental and is not required to contribute or validate this preview.
+For real Neon development without cloud charges, use [the Docker setup](docs/local-neon.md). It runs actual open-source services with a Stellane local controller; contract checks, live local-provider checks and DSH chat demonstrations are separate evidence. Cloud API support is experimental and is outside the 0.1 release scope.
 
 Stello integration tests need a separate test instance and copied build artifacts. Never run the test fixture against someone else's active Stello deployment or build in a shared checkout. Setup and validation details are in [DEVELOPMENT.md](DEVELOPMENT.md).
 

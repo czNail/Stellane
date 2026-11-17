@@ -136,4 +136,4 @@ corepack pnpm demo:branches reconcile --state-dir /absolute/path/printed-run-dir
 
 进程崩溃后可能留下 `runner.lock`。先确认其中记录的进程已经退出，再仅删除该锁文件并执行 `reconcile`。这与 Core 的 `owner.sqlite` 是两种锁；永远不要删 `owner.sqlite` 绕过占用。不要通过删除整个状态目录掩盖失败。
 
-Stello 提供固定数据切面。Neon 的基线和结果通过 Stellane 只读，外部管理员仍可能修改；历史观察需要复核。Neon 的 API 契约测试与真实本地提供方测试分别记录；Docker 路径不需要付费云账号，云端验收不在本预览范围内。脚本只报告实际观测结果，不承诺永久不可变或零资源开销。
+Stello 提供固定数据切面。Neon 的基线和结果通过 Stellane 只读，外部管理员仍可能修改；历史观察需要复核。Neon 的 API 契约测试与真实本地提供方测试分别记录；Docker 路径不需要付费云账号，云端验收不在 0.1 范围内。脚本只报告实际观测结果，不承诺永久不可变或零资源开销。

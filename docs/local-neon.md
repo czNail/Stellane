@@ -11,7 +11,7 @@ The controller in this repository is a **Stellane local development controller**
 
 ## Start and connect
 
-Use Node.js 24.9+ and Docker accessible to the current user. With the preview package installed:
+Use Node.js 24.9+ and Docker accessible to the current user. With Stellane installed:
 
 ```sh
 dsh plugin --profile web exec stellane-neon start

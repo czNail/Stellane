@@ -4,21 +4,19 @@
 
 ## 安装 Stellane
 
-需要 Node.js **24.9+**、DSH **0.2.2-rc.1–rc.3** Web，以及已能正常聊天的模型配置。当前发布候选版本为 **0.1.0**。Linux 是当前真实运行验收环境，其他系统仍需单独验证。
-
-从 npm 安装之前已发布的临时版。
+需要 Node.js **24.9+**、DeepSeek Harness Web **0.2.2-rc.1 至 rc.3** 和可用的 DSH 模型连接。安装已在 Linux 实测。
 
 ```sh
-dsh plugin --profile web add @stellane/harness-plugin@0.3.0-preview.1
+dsh plugin --profile web add @stellane/harness-plugin@0.1.0
 ```
 
-验收 0.1.0 时，在源码目录运行 `corepack pnpm test:package`，再用生成包的绝对路径安装。包内包含构建好的 Host、界面、Skill 与演示数据。
+也可从 [GitHub Release](https://github.com/czNail/Stellane/releases/tag/v0.1.0) 下载归档，并传入本机绝对路径。
 
 ```sh
 dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
 ```
 
-重启同一 profile 的 Web Host，打开 **Stellane → 数据源 → 添加数据源**。普通 PostgreSQL 连接 URL 就能使用分析、血缘与记忆。先确认 DSH 普通对话能连接模型，再排查数据库接入；Stellane 沿用同一模型配置。
+重启该配置的 Web Host，再打开 **Stellane → 数据源 → 添加数据源**。普通 PostgreSQL URL 即可用于分析、血缘和记忆。
 
 没有自己的数据时，可以用 Docker 启动合成样例：
 
@@ -55,7 +53,7 @@ dsh plugin --profile web exec stellane-demo url
 
 ## 升级与恢复
 
-1. 停止旧 Host。早期开发版没有排他占用和新格式拒绝机制，不能与预览版同时写同一目录。
+1. 停止旧 Host。早期开发版没有排他占用和新格式拒绝机制，不能与 0.1 同时写同一目录。
 2. 私下备份完整状态目录，包含插件创建的凭据文件；演示数据库和本地控制器的数据另行备份。
 3. 在同一 profile 安装新包并重启。格式升级前会在 `backups/` 写入并检查 SQLite 一致快照，包含尚在 WAL 中的已提交数据。迁移失败保留原格式与数据。
 4. 在「管理与清理」检查数据源、近期证据和保留分支，再开始新任务。

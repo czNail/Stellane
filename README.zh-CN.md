@@ -62,23 +62,13 @@ Stellane 使用提供方的数据库分支能力。Stello 提供固定数据切�
 
 ## 安装
 
-当前代码面向 **0.1.0**。需要 Node.js **24.9+**、已能正常聊天的 DSH **0.2.2-rc.1 至 rc.3**，面板面向 Harness Web。预览安装包包含构建产物，使用者不需要先下载源码或安装编译器。
-
-要试用 0.1.0，在源码目录运行 `corepack pnpm test:package` 后安装生成的包。下面的 npm 命令安装的是之前已经发布的临时版本。
+Stellane 0.1.0 需要 Node.js **24.9+**、DeepSeek Harness Web **0.2.2-rc.1 至 rc.3** 和可用的 DSH 模型连接。安装已在 Linux 实测。
 
 ```sh
-dsh plugin --profile web add @stellane/harness-plugin@0.3.0-preview.1
+dsh plugin --profile web add @stellane/harness-plugin@0.1.0
 ```
 
-用本机的实际绝对路径安装 0.1.0 包。
-
-```sh
-dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
-```
-
-然后重启同一个 Web Host，从侧栏打开 Stellane。终端启动的 Host 停止后可重新运行 `dsh web`；远端使用 `dsh web --no-open` 和原有访问方式。
-
-界面支持中文和英文，可在面板切换。状态目录、升级备份和卸载步骤见[安装与维护指南](docs/install-and-maintain.zh-CN.md)。当前真实运行验收环境为 Linux，其他操作系统仍需各自完成端到端验证。
+重启该配置的 Web Host，从侧栏打开 Stellane。面板支持中英文切换。归档安装、备份与卸载见[安装与维护](docs/install-and-maintain.zh-CN.md)。
 
 ### 从源码开发
 
@@ -148,4 +138,4 @@ dsh plugin --profile web exec stellane-demo status
 
 0.1 的验收路径是 PostgreSQL 查询和 Stello 分支试验。本地和云端 Neon 分支均暂不做运行验收。Docker 自托管路线使用真实开源 Neon 服务和 Stellane 本地开发控制器，不依赖付费云账户。具体步骤和覆盖范围见[开发与验收](DEVELOPMENT.md#检查与验收)。演示结果说明合成样例中的行为，不代表生产场景固定的准确率或性能收益。
 
-本轮已验证与剩余发布检查见[发布状态](docs/release-status.zh-CN.md)。
+实测结果见[发布验收](docs/release-status.zh-CN.md)。

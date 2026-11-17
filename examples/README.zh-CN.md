@@ -19,7 +19,7 @@
 
 ## 准备本地演示库
 
-先按主 README 安装预览包，在运行 Harness Host 的同一台机器执行，需要 Docker 可用。前两项分析与记忆演示不需要源码仓库；源码用户可以把全文命令中的 `dsh plugin --profile web exec stellane-demo` 换成 `corepack pnpm demo`：
+先按主 README 安装 Stellane，在运行 Harness Host 的同一台机器执行，需要 Docker 可用。前两项分析与记忆演示不需要源码仓库；源码用户可以把全文命令中的 `dsh plugin --profile web exec stellane-demo` 换成 `corepack pnpm demo`：
 
 ```sh
 dsh plugin --profile web exec stellane-demo start
@@ -171,4 +171,4 @@ Manifest 用于复现和独立验收。普通对话里的探索由 Agent 完成�
 
 执行 `pnpm dev:db` 后可运行 `pnpm test:demo`，用真实 PG 检查公开数据、预期数字和 Core 行为。`pnpm demo:branches` 使用真实提供方分支。确定性脚本验收与实际 Agent 对话分别记录，具体见[开发与验收](../DEVELOPMENT.md)。
 
-实际对话、脚本检查与恢复限制分别记录在[本次演示验收记录](../docs/demo-validation.md)中。安装包在 rc.3 的完整上手过程另见[独立代理首次使用验收](../docs/first-use-validation.zh-CN.md)。
+实际验证结果见[发布验收](../docs/release-status.zh-CN.md)。

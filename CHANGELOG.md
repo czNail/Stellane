@@ -20,4 +20,4 @@ Preview for DSH Web 0.2.2-rc.1–rc.3 and Node.js 24.9+. Published as a temporar
 
 The preview is a single-Host product. It does not provide organization-wide access administration, automatic production adoption, general multi-Agent scheduling or complete external/column-transformation lineage. Contract tests, actual database tests and model-driven demonstrations are separate evidence; a skipped provider test is not acceptance. See [development and validation](DEVELOPMENT.md).
 
-Current release gates and remaining validation are tracked in [release status](docs/release-status.md).
+See [release verification](docs/release-status.md) for the 0.1 acceptance results.
