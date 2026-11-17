@@ -87,3 +87,31 @@ test('real semantic context: metadata, evidence, version CAS, scope and stale de
     assert.equal(revoked.definitions.length,0);assert.equal(revoked.excluded.length,1);
   } finally {await core.close();sql(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await rm(directory,{recursive:true,force:true});}
 });
+
+test('chat drafts are source-scoped and only a confirmed definition is reused across chats', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'stellane-draft-'));
+  const core = new StellaneCore(directory);
+  try {
+    const environment = await core.connectPostgres(connection);
+    const first: Actor = { kind: 'agent', id: 'first-chat', projectPath: connection.projectPath };
+    const next: Actor = { ...first, id: 'next-chat' };
+    const input = { environmentId: environment.id, title: '可计量记录', content: '每条记录的读数取 value。',
+      targets: [{ schema: 'public', table: 'sample_data', columns: ['value'] }] };
+    await assert.rejects(core.draftDefinition(input, { ...first, projectPath: directory }), /无权/);
+    await assert.rejects(core.draftDefinition({ ...input, targets: [{ ...input.targets[0], columns: ['absent'] }] }, first), /不存在/);
+    const draft = await core.draftDefinition(input, first);
+    const lookup = { environmentId: environment.id, query: '可计量记录的读数' };
+    assert.equal((await core.context(lookup, next)).definitions.length, 0);
+    await assert.rejects(core.importCatalog(draft.request, first), /用户导入/);
+    const [saved] = await core.importCatalog(draft.request, owner);
+    assert.equal((await core.importCatalog(draft.request, owner))[0]?.id, saved?.id);
+    assert.equal((await core.context(lookup, next)).definitions[0]?.id, saved?.id);
+    const update = await core.draftDefinition({ ...input, content: '只汇总 group_a 的 value。' }, next);
+    assert.equal(update.previousContent, input.content);
+    assert.equal((await core.importCatalog(update.request, owner))[0]?.version, 2);
+    assert.equal((await core.context(lookup, first)).definitions[0]?.content, '只汇总 group_a 的 value。');
+  } finally {
+    await core.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

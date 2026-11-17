@@ -1,14 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import { Store } from './store.ts';
 import { catalogSql } from './catalog-sql.ts';
-import { contextInput, importCatalogInput, metadataSchema } from '../shared/context-models.ts';
-import type { CatalogView, ContextRecord, ContextResult, DatabaseMetadata, DefinitionStatus, SemanticDefinition } from '../shared/context-models.ts';
+import { contextInput, definitionDraftInput, importCatalogInput, metadataSchema } from '../shared/context-models.ts';
+import type { CatalogView, ContextRecord, ContextResult, DatabaseMetadata, DefinitionDraft, DefinitionStatus, SemanticDefinition } from '../shared/context-models.ts';
 import { learnInput, type LearnResult } from '../shared/knowledge-models.ts';
 import type { Actor, Environment, Run } from '../shared/models.ts';
 import { fingerprint as hash, relevance, searchTerms } from './context-utils.ts';
 import { KnowledgeMemory, knowledgeTables, tableKey } from './knowledge.ts';
 
 const objectKey = (schema: string, table: string) => JSON.stringify([schema,table]);
+const titleKey = (title: string) => title.normalize('NFKC').trim().toLocaleLowerCase();
+function definitionDependencies(targets: SemanticDefinition['targets'], relations: CatalogView['relations']) {
+  return targets.map(target => {
+    const relation = relations.find(item => item.schema === target.schema && item.name === target.table);
+    if (!relation || target.columns.some(column => !relation.columns.some(item => item.name === column))) {
+      throw new Error(`依赖对象或字段不存在、不可访问：${target.schema}.${target.table}`);
+    }
+    return { schema: target.schema, table: target.table, fingerprint: hash(relation) };
+  });
+}
 type ReadMetadata = (environmentId: string, sql: string, actor: Actor, signal: AbortSignal, purpose: 'context' | 'knowledge') => Promise<Run>;
 type Observation = Omit<CatalogView, 'knowledge'> & { metadata: DatabaseMetadata };
 const notes = ['元数据只覆盖当前 SQL 角色拥有整表 SELECT 权限的用户对象。',
@@ -110,6 +120,34 @@ export class SemanticCatalog {
       changes:previous?{previousContextId:previous.id,structureChanged:previous.sourceFingerprint!==view.context.sourceFingerprint || previous.schemaFingerprint!==view.context.schemaFingerprint,
         definitionsChanged:previous.catalogFingerprint!==view.context.catalogFingerprint}:undefined,notes:view.notes };
   }
+  async draft(value: unknown, actor: Actor, signal: AbortSignal): Promise<DefinitionDraft> {
+    const { environmentId, title, content, targets } = definitionDraftInput.parse(value);
+    const view = await this.observe(environmentId, actor, signal);
+    const environment = this.environment(environmentId);
+    if (environment.parentEnvironmentId) throw new Error('请在原数据源的普通对话中整理业务说明。');
+    definitionDependencies(targets, view.relations);
+    const normalizedTitle = titleKey(title);
+    const key = `chat.${hash(normalizedTitle).slice(0, 32)}`;
+    const candidates = view.versions.filter(({ definition, status }) =>
+      status === 'applicable' && (definition.key === key || titleKey(definition.title) === normalizedTitle));
+    if (candidates.length > 1) throw new Error('找到多条同名业务说明，请在数据目录中选择要更新的一条。');
+    const previous = candidates[0]?.definition;
+    const latest = view.versions.filter(({ definition }) => definition.key === key)
+      .reduce((version, { definition }) => Math.max(version, definition.version), 0);
+    if (latest && !previous) throw new Error('这条业务说明已归档或失效，请在数据目录中核对后更新。');
+    return {
+      environmentName: environment.name,
+      projectPath: environment.projectPath,
+      previousContent: previous?.content,
+      request: {
+        environmentId, baseContextId: view.context.id, requestId: view.context.id,
+        document: { source: { name: 'DSH chat' }, entries: [{
+          key: previous?.key ?? key, title, content, targets, kind: previous?.kind ?? 'description',
+          sql: previous?.sql, expectedVersion: previous?.version ?? 0,
+        }] },
+      },
+    };
+  }
   async import(value: unknown,actor: Actor,signal: AbortSignal): Promise<SemanticDefinition[]> {
     if (actor.kind!=='user') throw new Error('业务定义由用户导入，Agent 通过上下文工具读取。');
     const input=importCatalogInput.parse(value); if (Buffer.byteLength(JSON.stringify(input.document))>65536) throw new Error('导入文档超过 64 KiB。');
@@ -128,11 +166,7 @@ export class SemanticCatalog {
       const definitions=input.document.entries.map(entry=>{
         const previous=versions.filter(item=>item.key===entry.key).sort((a,b)=>b.version-a.version)[0];
         if ((previous?.version ?? 0)!==entry.expectedVersion) throw new Error(`定义 ${entry.key} 已变化，请读取最新版本再更新。`);
-        const dependencies=entry.targets.map(target=>{
-          const relation=view.relations.find(item=>item.schema===target.schema && item.name===target.table);
-          if (!relation || target.columns.some(column=>!relation.columns.some(item=>item.name===column))) throw new Error(`依赖对象或字段不存在、不可访问：${target.schema}.${target.table}`);
-          return {schema:target.schema,table:target.table,fingerprint:hash(relation)};
-        });
+        const dependencies = definitionDependencies(entry.targets, view.relations);
         const {expectedVersion:_expectedVersion,...content}=entry;
         const definition:SemanticDefinition={...content,id:randomUUID(),version:(previous?.version ?? 0)+1,projectPath:view.context.projectPath,dataSourceId:view.context.dataSourceId,
           sourceFingerprint:view.context.sourceFingerprint,source:input.document.source,author:{...actor},createdAt:new Date().toISOString(),contextId:view.context.id,runId:view.context.runId,dependencies};

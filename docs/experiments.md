@@ -23,7 +23,7 @@ Run the same checks on both branches. Count remaining duplicates, reconcile paym
 
 ## Try the workflow in 0.1
 
-In an ordinary DSH chat, save one baseline and start named experiments from it. Apply each proposal one SQL step at a time. Save the results and evidence, then inspect them in **Activity and results**. When you no longer need retained results, remove them before their baseline in **Management → Retained branches**.
+In an ordinary DSH chat, the agent can save one baseline and start named experiments from it. It applies each proposal one SQL step at a time and saves the results and evidence. The source build groups plans from the same baseline in **Branch experiments**, with a link below the answer. With npm `0.1.0`, open **Activity and results**. When you no longer need retained results, remove them before their baseline in **Management → Retained branches**.
 
 With a dedicated order test database, give the agent the confirmed duplicate rule, the allowed changes and the reports to check. For example:
 

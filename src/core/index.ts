@@ -301,6 +301,9 @@ export class StellaneCore {
   importCatalog(value: unknown, actor: Actor, signal?: AbortSignal): Promise<SemanticDefinition[]> {
     return this.track(signal=>this.catalog.import(value,actor,signal),signal);
   }
+  draftDefinition(value: unknown, actor: Actor, signal?: AbortSignal) {
+    return this.track(signal => this.catalog.draft(value, actor, signal), signal);
+  }
   learn(value: unknown, actor: Actor, signal?: AbortSignal): Promise<LearnResult> {
     return this.track(signal => this.catalog.learn(value, actor, signal), signal);
   }

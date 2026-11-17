@@ -269,10 +269,11 @@ export function apply(ctx: Context, config: Config): void {
       return JSON.parse(JSON.stringify(await core.finishExperiment(args.id, exec.signal, actor(exec.agent, exec.callId))));
     },
   }));
-  const endpoint = { type: 'object', additionalProperties: false, required: true, properties: {
+  const endpointValue = { type: 'object', additionalProperties: false, properties: {
     schema: { type: 'string', required: true }, table: { type: 'string', required: true },
     columns: { type: 'array', required: true, items: { type: 'string' } },
   } } as const;
+  const endpoint = { ...endpointValue, required: true } as const;
   ctx.tools.register(defineTool({
     name:'stellane_context',
     description:'获取可读表、业务定义、视图血缘、行粒度和关联。declared 表示数据库目录依赖，observed 表示固定切面的数据观察，needs-check 是可变数据上的历史观察。invalidatedRelationships 是历史失效记录，可将其 ID 交给 stellane_metric 重新核对本次范围。',
@@ -280,6 +281,19 @@ export function apply(ctx: Context, config: Config): void {
       limit:{type:'number',description:'最多返回多少个对象和定义，1 到 16，默认 8。'},
       previousContextId:{type:'string',description:'可选：同环境之前的上下文 ID，比较结构和业务定义版本是否变化。'}},output,
     async execute(args,exec) { return JSON.parse(JSON.stringify(await core.context(args,actor(exec.agent,exec.callId),exec.signal))); },
+  }));
+  ctx.tools.register(defineTool({
+    name: 'stellane_draft_definition',
+    description: '在用户明确要求记住或更正业务词、字段含义或计算口径时，准备一份可在对话中确认的说明。核对数据源、表和字段，不会直接保存。目标应来自实际调查。',
+    parameters: {
+      environmentId,
+      title: { type: 'string', required: true, description: '下次提问时会使用的业务词' },
+      content: { type: 'string', required: true, description: '用户已说明或可查证的含义、适用条件和计算口径' },
+      targets: { type: 'array', required: true, items: endpointValue },
+    }, output,
+    async execute(args, exec) {
+      return JSON.parse(JSON.stringify(await core.draftDefinition(args, actor(exec.agent, exec.callId), exec.signal)));
+    },
   }));
   ctx.tools.register(defineTool({
     name: 'stellane_learn',

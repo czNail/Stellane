@@ -17,6 +17,15 @@ export const definitionInput = z.strictObject({
 export const documentInput = z.strictObject({ source: z.strictObject({ name: z.string().trim().min(1).max(200), uri: z.string().trim().max(1024).optional() }),
   entries: z.array(definitionInput).min(1).max(16) }).refine(value => new Set(value.entries.map(entry => entry.key)).size === value.entries.length, '文档内 key 不能重复');
 export const importCatalogInput = z.strictObject({ environmentId: id, baseContextId: id, requestId: id, document: documentInput });
+export const definitionDraftInput = z.strictObject({
+  environmentId: id, title: definitionInput.shape.title, content: definitionInput.shape.content, targets: definitionInput.shape.targets,
+});
+export interface DefinitionDraft {
+  environmentName: string;
+  projectPath: string;
+  previousContent?: string;
+  request: z.input<typeof importCatalogInput>;
+}
 export type SemanticDocument = z.input<typeof documentInput>;
 export type DefinitionContent = z.output<typeof definitionInput>;
 

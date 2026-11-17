@@ -18,9 +18,9 @@ function displayProof(run: Run): Run {
   } } : run;
 }
 
-export function RunEvidence({ id, api, environments, openEvidence, openConversation, onBack }: {
+export function RunEvidence({ id, api, environments, openEvidence, openConversation, onBack, returnToChat }: {
   id: string; api: Api; environments: Environment[]; openEvidence: (id: string) => void;
-  openConversation: Conversation; onBack: () => void;
+  openConversation: Conversation; onBack: () => void; returnToChat: boolean;
 }) {
   useLocale();
   const [run, setRun] = useState<Run>();
@@ -42,14 +42,14 @@ export function RunEvidence({ id, api, environments, openEvidence, openConversat
     finally { setOpening(false); }
   }
   return <section className="st-stack" aria-label={t("执行证据")}>
-    <button className="st-button st-quiet st-back" onClick={onBack}>{t("← 任务与结果")}</button>
-    <div className="st-page-heading"><div><h2>{t("执行证据")}</h2>
+    <button className="st-button st-quiet st-back" onClick={onBack}>{t(returnToChat ? '← 返回对话' : '← 返回')}</button>
+    <div className="st-page-heading"><div><h2>{metric ? t('指标证据') : t('执行证据')}</h2>
       {run && <p className="st-muted">{environment?.name ?? run.branch?.resource ?? run.target?.database} · {new Date(run.startedAt).toLocaleString()}</p>}</div>
       {run && metric?.counts && metric.status !== 'complete' && environment && describeEnvironment(environment).canExperiment
         && <button className="st-button st-primary" disabled={opening} onClick={() => void tryRepair(environment, run)}>{t("试算修复")}</button>}</div>
     {failure && <p role="alert" className="st-error">{systemMessage(failure)}</p>}
     {!run && !failure && <p role="status">{t("正在读取执行记录…")}</p>}
-    {run && <><p className="st-path">{t("执行记录")}{run.id}</p><QueryResult run={displayProof(run)} /></>}
+    {run && <QueryResult run={displayProof(run)} compact />}
     {metric && <section className="st-stack st-task-section" aria-label={t("指标口径与复核")}>
       <h3>{t("口径与关系")}</h3>
       <p className="st-muted">{t("口径版本")}{metric.version.slice(0,12)}{metric.snapshot && <> {t("· 数据快照")}{metric.snapshot}</>}</p>

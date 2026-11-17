@@ -24,7 +24,7 @@ function PreviewTable({ preview, metric, generated }: { preview: QueryPreview; m
   </table></div>;
 }
 
-export function QueryResult({ run, onReconcile, busy }: { run: Run; onReconcile?: () => void; busy?: boolean }) {
+export function QueryResult({ run, onReconcile, busy, compact }: { run: Run; onReconcile?: () => void; busy?: boolean; compact?: boolean }) {
   useLocale();
   const preview = run.preview;
   return <section className="st-result" aria-label={t("查询结果")}>
@@ -32,14 +32,14 @@ export function QueryResult({ run, onReconcile, busy }: { run: Run; onReconcile?
     <div className="st-row st-result-meta"><span className={`st-status st-${run.status}`}>{runStatus[run.status]}</span>
       <span className="st-muted">{preview && (run.kind === 'execute' ? t("影响 {0} 行", preview.affectedRows ?? 0) : t("{0} 行{1}", preview.rowCount, preview.truncated ? t('预览') : ''))}
         {run.durationMs !== undefined && `${preview ? ' · ' : ''}${run.durationMs} ms`}</span>
-      {!run.metric && <code className="st-result-sql" title={run.sql}>{run.sql}</code>}
+      {!compact && !run.metric && <code className="st-result-sql" title={run.sql}>{run.sql}</code>}
     </div>
     {run.error && <p role="alert" className="st-error">{systemMessage(run.error)}</p>}
     {run.status === 'unknown' && onReconcile && <button className="st-button" disabled={busy} onClick={onReconcile}>{t("核对原写入回执")}</button>}
     {preview && (run.kind !== 'execute' && preview.rowCount === 0
       ? <p className="st-list-empty">{t("没有符合条件的记录。")}</p>
       : <PreviewTable preview={preview} metric={!!run.metric} generated={!!run.metric || run.purpose === 'knowledge'} />)}
-    <details className="st-details"><summary>{t("执行详情")}</summary>
+    <details className="st-details"><summary>{t(compact ? 'SQL 与执行详情' : '执行详情')}</summary>
       <pre className="st-code">{run.sql}</pre>
       {!!run.values?.length && <p className="st-path">{t("查询参数")}<code>{JSON.stringify(run.values)}</code></p>}
       {run.target && <p className="st-path">{run.target.database} · {run.target.user} · {run.target.address ?? t("本地")}:{run.target.port ?? '—'}</p>}

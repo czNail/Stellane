@@ -6,12 +6,7 @@ import type { Environment } from '../shared/models.ts';
 import { DefinitionEditor, definitionKinds } from './catalog-editor.tsx';
 import { ActionDialog, message, type Api } from './workspace-ui.tsx';
 
-const tabs = localizedLabels({ tables: '表与字段', definitions: '业务说明', relationships: '关系与血缘' });
-const tabHelp = localizedLabels({
-  tables: '数据库中的实际结构与注释，帮助理解有哪些数据。',
-  definitions: '团队提供的字段含义、计算口径和参考 SQL，帮助明确问题该怎样计算。',
-  relationships: '查看数据库声明的依赖，以及 Agent 验证并记住的关系。历史观察会在数据变化后重新核对。',
-});
+const tabs = localizedLabels({ relationships: '关系与血缘', definitions: '业务说明', tables: '表与字段' });
 type CatalogTab = keyof typeof tabs;
 type Editor = { kind: 'form'; definition?: SemanticDefinition } | { kind: 'import' };
 const endpointName = (endpoint: KnowledgeEndpoint) => `${endpoint.schema}.${endpoint.table}（${endpoint.columns.join('、')}）`;
@@ -27,6 +22,8 @@ function KnowledgeList({ items, search, openEvidence }: { items: KnowledgeItem[]
   useLocale();
   const matches = items.filter(item => knowledgeLabel(item).toLocaleLowerCase().includes(search));
   const current = matches.filter(item => item.status !== 'superseded' && item.status !== 'stale' && item.status !== 'archived');
+  const remembered = current.filter(item => item.fact.kind !== 'view-lineage');
+  const lineage = current.filter(item => item.fact.kind === 'view-lineage');
   const history = matches.filter(item => item.status === 'superseded' || item.status === 'stale' || item.status === 'archived');
   const render = (item: KnowledgeItem) => {
     const invalidation = 'invalidation' in item ? item.invalidation : undefined;
@@ -50,10 +47,11 @@ function KnowledgeList({ items, search, openEvidence }: { items: KnowledgeItem[]
     </div>
   </details>;
   };
-  return <div className="st-stack">
-    {current.length ? <div className="st-list">{current.map(render)}</div>
-      : <p className="st-list-empty">{search ? t("没有匹配的关系或血缘。") : t("暂无已发现的关系。可以让 Agent 调查两张表的关联键或某个视图的来源。")}</p>}
-    {history.length > 0 && <details className="st-details"><summary>{t("历史与失效记录")}</summary><div className="st-list">{history.map(render)}</div></details>}
+  return <div className="st-stack st-catalog-groups">
+    {!current.length && !history.length && <p className="st-list-empty">{search ? t('没有匹配的关系或血缘。') : t('暂无已发现的关系。可以让 Agent 调查两张表的关联键或某个视图的来源。')}</p>}
+    {remembered.length > 0 && <section className="st-stack"><h3>{t('已保存的关系')}</h3><div className="st-list">{remembered.map(render)}</div></section>}
+    {history.length > 0 && <details className="st-details"><summary>{t('历史与失效记录')} · {history.length}</summary><div className="st-list st-item-body">{history.map(render)}</div></details>}
+    {lineage.length > 0 && <section className="st-stack"><h3>{t('视图来源')}</h3><div className="st-list">{lineage.map(render)}</div></section>}
   </div>;
 }
 
@@ -145,12 +143,12 @@ function ImportForm({ relation, busy, onSave, onClose }: {
   </form>;
 }
 
-export function CatalogPanel({ api, environment, onExplore, openEvidence }: {
-  api: Api; environment: Environment; onExplore: () => void; openEvidence: (id: string) => void;
+export function CatalogPanel({ api, environment, openEvidence }: {
+  api: Api; environment: Environment; openEvidence: (id: string) => void;
 }) {
   useLocale();
   const [view, setView] = useState<CatalogView>();
-  const [tab, setTab] = useState<CatalogTab>('tables');
+  const [tab, setTab] = useState<CatalogTab>('relationships');
   const [search, setSearch] = useState('');
   const [editor, setEditor] = useState<Editor>();
   const [busy, setBusy] = useState(false);
@@ -192,17 +190,15 @@ export function CatalogPanel({ api, environment, onExplore, openEvidence }: {
   const term = search.trim().toLocaleLowerCase();
   const closeEditor = () => { setEditor(undefined); setError(''); };
   return <section className="st-stack" aria-label={t("数据目录")}>
-    <div className="st-page-heading"><div><h2>{t("数据目录")}</h2><p className="st-muted">{t("查表结构、业务口径、数据关系和视图来源。")}</p></div>
-      <button className="st-button st-quiet" onClick={onExplore}>{t("去探索")}</button></div>
+    <div className="st-page-heading"><h2>{t('数据目录')}</h2></div>
     <nav className="st-tabs" aria-label={t("目录分类")}>{Object.entries(tabs).map(([key, label]) => <button key={key}
       aria-pressed={tab === key} onClick={() => { setTab(key as CatalogTab); setSearch(''); setFeedback(''); }}>{label}</button>)}</nav>
-    <p className="st-muted">{tabHelp[tab]}</p>
     <div className="st-catalog-toolbar">
       <input className="st-search" aria-label={t("搜索{0}", tabs[tab])} placeholder={tab === 'tables' ? t("搜索表名、字段或注释") : t("搜索{0}", tabs[tab])}
         type="search" value={search} onChange={event => setSearch(event.target.value)} disabled={!view} />
       <div className="st-actions"><button className="st-button st-quiet" disabled={loading || busy} onClick={() => void refresh()}>{loading ? t("读取中…") : t("刷新目录")}</button>
         {tab === 'definitions' && view && <>
-          <button className="st-button" onClick={() => { setError(''); setEditor({ kind: 'import' }); }}>{t("导入 JSON")}</button>
+          <button className="st-button st-quiet" onClick={() => { setError(''); setEditor({ kind: 'import' }); }}>{t("导入 JSON")}</button>
           <button className="st-button st-primary" disabled={!view.relations.length} onClick={() => { setError(''); setEditor({ kind: 'form' }); }}>{t("添加说明")}</button>
         </>}
       </div>

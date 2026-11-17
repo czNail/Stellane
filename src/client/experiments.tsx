@@ -1,12 +1,14 @@
 import { t, systemMessage, useLocale, labels as localizedLabels } from './i18n.tsx';
 import { useEffect, useState } from 'react';
-import type { Environment, Experiment, ExperimentDetail, Run } from '../shared/models.ts';
+import type { Delivery, Environment, Experiment, ExperimentDetail, Run } from '../shared/models.ts';
 import { describeEnvironment } from '../shared/capabilities.ts';
 import { QueryResult, runStatus, type Conversation } from './explore.tsx';
 import { ActionDialog, environmentLabel, message, type Api } from './workspace-ui.tsx';
 import { MetricComparison } from './metric.tsx';
 
 const labels = localizedLabels({ preparing: '准备中', active: '进行中', closing: '清理中', closed: '已结束' });
+const experimentLabel = (experiment: Experiment) => experiment.error ? t('需处理')
+  : experiment.status === 'closed' && experiment.deliveryId ? t('结果已保存') : labels[experiment.status];
 
 export function StartExperiment({ source, api, onClose, onStarted }: {
   source: Environment; api: Api; onClose: () => void; onStarted: (detail: ExperimentDetail) => void;
@@ -44,37 +46,55 @@ export function StartExperiment({ source, api, onClose, onStarted }: {
   </ActionDialog>;
 }
 
-export function ExperimentList({ experiments, environments, onOpen }: {
-  experiments: Experiment[]; environments: Environment[]; onOpen: (id: string) => void;
+export function ExperimentList({ experiments, environments, deliveries, onOpen }: {
+  experiments: Experiment[]; environments: Environment[]; deliveries: Delivery[]; onOpen: (id: string) => void;
 }) {
   useLocale();
   const [project, setProject] = useState('');
   const projects = [...new Set(experiments.map(item => item.projectPath))];
   const visible = experiments.filter(item => !project || item.projectPath === project);
-  return <section className="st-stack st-task-section" aria-label={t("实验任务")}>
-    <h3>{t("实验任务")}</h3>
+  const groups = new Map<string, Experiment[]>();
+  const environmentById = new Map(environments.map(item => [item.id, item]));
+  const deliveryById = new Map(deliveries.map(item => [item.id, item]));
+  for (const experiment of visible) {
+    const source = environmentById.get(experiment.sourceId);
+    const key = experiment.baselineId ?? (source?.mode === 'fixed' ? source.id : experiment.id);
+    const group = groups.get(key);
+    if (group) group.push(experiment);
+    else groups.set(key, [experiment]);
+  }
+  return <section className="st-stack" aria-label={t("实验任务")}>
     {projects.length > 1 && <label className="st-field st-task-project"><span>{t("项目")}</span>
       <select value={project} onChange={event => setProject(event.target.value)}>
         <option value="">{t("全部项目")}</option>{projects.map(path => <option key={path}>{path}</option>)}
       </select>
     </label>}
-    {!visible.length ? <p className="st-muted">{t("暂无实验任务。")}</p>
-    : <div className="st-list">{visible.map(experiment => <article className="st-list-row st-source-row" key={experiment.id}>
-      <div className="st-source-info"><div className="st-row"><h3>{experiment.name}</h3>
-        <span className={`st-status${experiment.error ? ' st-unknown' : ''}`}>{experiment.error ? t("需处理") : labels[experiment.status]}</span>
-        {experiment.deliveryId && <span className="st-muted">{t("结果已保存")}</span>}</div>
-        <p className="st-muted">{environments.find(environment => environment.id === experiment.sourceId)?.name ?? t("数据源")} · {new Date(experiment.createdAt).toLocaleString()}</p>
-      </div>
-      <button className="st-button" aria-label={t("打开任务 {0}", experiment.name)} onClick={() => onOpen(experiment.id)}>{t("查看任务")}</button>
-    </article>)}</div>}
+    {!visible.length ? <div className="st-empty"><h3>{t('暂无分支试验')}</h3>
+      <p>{t('在项目对话中说明要验证的改法。支持分支的来源会在这里显示进度和结果。')}</p></div>
+    : [...groups].map(([key, group]) => <section className="st-stack st-branch-group" key={key}>
+      {group.length > 1 && <div className="st-row st-branch-heading"><h3>{t('同一基线 · {0} 个方案', group.length)}</h3>
+        <span className="st-muted">{environmentById.get(key)?.name}</span></div>}
+      <div className="st-list">{group.map(experiment => {
+        const summary = experiment.deliveryId ? deliveryById.get(experiment.deliveryId)?.summary : undefined;
+        return <article className="st-list-row st-source-row" key={experiment.id}>
+          <div className="st-source-info"><div className="st-row"><h3>{experiment.name}</h3>
+            <span className={`st-status${experiment.error ? ' st-unknown' : ''}`}>{experimentLabel(experiment)}</span></div>
+            <p className="st-muted">{environmentById.get(experiment.sourceId)?.name ?? t('数据源')} · {new Date(experiment.createdAt).toLocaleString()}</p>
+            {summary && <p className="st-plan-summary">{summary}</p>}
+          </div>
+          <button className="st-button" aria-label={t('打开任务 {0}', experiment.name)} onClick={() => onOpen(experiment.id)}>{t('查看试验')}</button>
+        </article>;
+      })}</div>
+    </section>)}
   </section>;
 }
 
-export function ExperimentView({ id, initial, api, refresh, openConversation, openSession, openEvidence, onBack, onSql }: {
+export function ExperimentView({ id, initial, api, refresh, openConversation, openSession, openEvidence, onBack, onSql, experiments, onOpenExperiment }: {
   id: string; initial?: ExperimentDetail; api: Api; refresh: () => Promise<unknown>; openConversation: Conversation;
   openSession: (sessionId: string) => void;
   openEvidence: (id: string) => void;
   onBack: () => void; onSql: (environment: Environment, run?: Run) => void;
+  experiments: Experiment[]; onOpenExperiment: (id: string) => void;
 }) {
   useLocale();
   const [detail, setDetail] = useState(initial);
@@ -118,7 +138,7 @@ export function ExperimentView({ id, initial, api, refresh, openConversation, op
     finally { setBusy(undefined); }
   }
 
-  const back = <button className="st-button st-quiet st-back" onClick={onBack}>{t("← 任务与结果")}</button>;
+  const back = <button className="st-button st-quiet st-back" onClick={onBack}>{t('← 分支试验')}</button>;
   if (!detail) return <section className="st-stack">{back}{loadError ? <p role="alert" className="st-error">{systemMessage(loadError)}</p>
     : <p role="status" className="st-muted">{t("正在读取任务…")}</p>}</section>;
   const { experiment, source, baseline, work, result, delivered, unresolved, runs } = detail;
@@ -127,6 +147,7 @@ export function ExperimentView({ id, initial, api, refresh, openConversation, op
   const blocked = !!busy || !!detail.processing;
   const capturing = !!detail.processing && active && !delivered;
   const sessionId = experiment.sessionId;
+  const siblings = experiment.baselineId ? experiments.filter(item => item.id !== id && item.baselineId === experiment.baselineId) : [];
   const evidenceRun = selectedRun && (runs.find(item => item.id === selectedRun.id) ?? selectedRun);
   const refreshDetail = () => api('experimentDetail', { id });
   const reconcile = (run: Run) => void act('receipt', async () => {
@@ -138,9 +159,8 @@ export function ExperimentView({ id, initial, api, refresh, openConversation, op
   return <section className="st-stack st-task" aria-label={t("任务详情")}>
     {back}
     <div className="st-page-heading">
-      <div className="st-row st-task-title"><h2>{experiment.name}</h2><span className="st-status">{capturing ? t("保存结果中") : labels[experiment.status]}</span></div>
+      <div className="st-row st-task-title"><h2>{experiment.name}</h2><span className="st-status">{capturing ? t("保存结果中") : experimentLabel(experiment)}</span></div>
       <div className="st-actions">
-        {active && work && <button className="st-button" disabled={blocked} onClick={() => onSql(work)}>{t("执行 SQL")}</button>}
         {sessionId ? <button className="st-button" onClick={() => openSession(sessionId)}>{t("查看原对话")}</button>
           : active && work && <button className="st-button" disabled={blocked} onClick={() => void act('chat', () => openConversation(work.id,
           t("请在已绑定的 Stellane 工作分支验证「{0}」。先用 stellane_environments 和 stellane_context 核对目标与业务定义。使用 stellane_query 查证，必要时在当前分支用 stellane_execute 执行单条事务。保留证据 SQL 供保存结果时核验。", experiment.name)))}>
@@ -148,17 +168,15 @@ export function ExperimentView({ id, initial, api, refresh, openConversation, op
         </button>}
       </div>
     </div>
+    {!!siblings.length && <nav className="st-row st-related-plans" aria-label={t('同一基线的其他方案')}>
+      <span className="st-muted">{t('同一基线的其他方案')}</span>
+      {siblings.map(item => <button className="st-button" key={item.id} onClick={() => onOpenExperiment(item.id)}>{item.name}</button>)}
+    </nav>}
     <dl className="st-task-scope">
       <div><dt>{t("来源")}</dt><dd>{source.name}</dd></div>
       <div><dt>{t("基线")}</dt><dd>{baseline?.name ?? t("准备中")}{baseline?.removedAt && <small>{baseline.retainedReason ? t("已停用，保留依赖") : t("已清理")}</small>}</dd></div>
       <div><dt>{t("工作分支")}</dt><dd>{work ? work.removedAt ? work.retainedReason ? t("已停用，保留依赖") : t("已清理") : t("独立可写") : t("准备中")}</dd></div>
     </dl>
-    {baseline && <details className="st-details"><summary>{t("数据状态详情")}</summary>
-      <p>{describeEnvironment(baseline).providerLabel} · {environmentLabel(baseline)}</p>
-      <p>{t("基线")}{baseline.neon?.branchId ?? baseline.stello?.resource} · {baseline.neon?.parentLsn ?? baseline.stello?.forkLsn}</p>
-      {work && <p>{t("工作分支")}{work.neon?.branchId ?? work.stello?.resource}</p>}
-      {baseline.neon && <p>{t("此基线在 Stellane 中只读。Neon 项目中的外部修改仍可能改变分支，重新使用关系前会复核。")}</p>}
-    </details>}
     {experiment.retentionNote && <p className="st-attention" role="status">{systemMessage(experiment.retentionNote)}</p>}
     {(error || loadError || experiment.error) && <p className="st-attention st-error" role="alert">{systemMessage(error || loadError || experiment.error || '')}</p>}
     {experiment.status === 'preparing' && <div className="st-attention st-row" role="status">
@@ -171,22 +189,24 @@ export function ExperimentView({ id, initial, api, refresh, openConversation, op
       <h3>{t("待核实写入")}</h3>{unresolved.map(run => <QueryResult key={run.id} run={run} busy={!!busy} onReconcile={() => reconcile(run)} />)}
     </section>}
     {detail.baselineMetric && <MetricComparison before={detail.baselineMetric} after={delivered?.run} openEvidence={openEvidence} />}
-    <section className="st-task-section st-stack" aria-label={t("已保存结果")}>
-      <div className="st-row st-section-heading"><h3>{t("已保存结果")}</h3>
-        {active && !delivered && !capturing && <button className="st-button" disabled={blocked || !!unresolved.length} onClick={() => setDialog('capture')}>
-          {result ? t("补查证据") : experiment.evidence ? t("核对并交付") : t("保存结果与证据")}
+    <section className="st-task-section st-stack" aria-label={t("试验结果")}>
+      <div className="st-row st-section-heading"><h3>{t("试验结果")}</h3>
+        {active && !delivered && !capturing && (result || experiment.evidence) && <button className="st-button" disabled={blocked || !!unresolved.length} onClick={() => setDialog('capture')}>
+          {result ? t("补查证据") : t("核对并交付")}
         </button>}
       </div>
       {delivered ? <article className="st-stack st-task-result">
         <div className="st-source-row"><div><p className="st-content">{delivered.delivery.summary}</p>
           <p className="st-muted">{environmentLabel(delivered.environment)} {t("· 证据已保存")}</p></div>
-          <button className="st-button" onClick={() => onSql(delivered.environment, delivered.run)}>{t("查看结果数据")}</button>
+          <button className="st-button" onClick={() => openEvidence(delivered.run.id)}>{t("查看结果证据")}</button>
         </div>
-        <QueryResult run={delivered.run} />
       </article> : <p className="st-muted">{capturing ? t("正在保存结果并执行证据查询。") : result ? t("结果分支已保存，可在原分支补查只读证据。")
+        : experiment.status === 'closed' ? t('试验结束时未保存结果。执行记录仍可查看。')
         : t("方案验证完成后，这里会展示结论、结果数据和查询证据。")}</p>}
     </section>
-    {work && <section className="st-task-section st-stack" aria-label={t("执行记录")}>
+    {work && <details className="st-details st-task-section st-run-details">
+      <summary>{t('执行记录')} · {runs.length}</summary>
+      <div className="st-stack st-item-body">
       <div className="st-row st-section-heading"><h3>{t("执行记录")}</h3><button className="st-button st-quiet" disabled={!!busy}
         onClick={() => void act('load', refreshDetail)}>{busy === 'load' ? t("正在刷新…") : t("刷新记录")}</button></div>
       {runs.length ? <div className="st-history">{runs.map(run => <button key={run.id} onClick={() => setSelectedRun(run)}>
@@ -194,7 +214,22 @@ export function ExperimentView({ id, initial, api, refresh, openConversation, op
         <time>{new Date(run.startedAt).toLocaleTimeString()}</time>
       </button>)}</div> : <p className="st-muted">{t("暂无查询或写入。")}</p>}
       {evidenceRun && <QueryResult run={evidenceRun} busy={!!busy} onReconcile={() => reconcile(evidenceRun)} />}
-    </section>}
+      </div>
+    </details>}
+    {baseline && <details className="st-details"><summary>{t("数据状态详情")}</summary>
+      <p>{describeEnvironment(baseline).providerLabel} · {environmentLabel(baseline)}</p>
+      <p>{t("基线")}{baseline.neon?.branchId ?? baseline.stello?.resource} · {baseline.neon?.parentLsn ?? baseline.stello?.forkLsn}</p>
+      {work && <p>{t("工作分支")}{work.neon?.branchId ?? work.stello?.resource}</p>}
+      {baseline.neon && <p>{t("此基线在 Stellane 中只读。Neon 项目中的外部修改仍可能改变分支，重新使用关系前会复核。")}</p>}
+    </details>}
+    {((active && work) || (delivered && !delivered.environment.removedAt)) && <details className="st-details"><summary>{t('手动操作')}</summary>
+      <div className="st-actions st-item-body">
+        {active && work && <button className="st-button" disabled={blocked} onClick={() => onSql(work)}>{t('执行 SQL')}</button>}
+        {delivered && !delivered.environment.removedAt && <button className="st-button" onClick={() => onSql(delivered.environment, delivered.run)}>{t('查看结果数据')}</button>}
+        {active && !delivered && !capturing && !result && !experiment.evidence && <button className="st-button" disabled={blocked || !!unresolved.length}
+          onClick={() => setDialog('capture')}>{t('保存结果与证据')}</button>}
+      </div>
+    </details>}
     {experiment.status !== 'closed' && <footer className="st-task-footer st-row">
       <p className="st-muted">{delivered ? source.neon ? t("结束后移除临时 compute，保留结果及依赖分支的存储。") : t("清理工作分支会保留已交付的结果。") : active ? t("需要保留结果时，请先保存结果与证据。") : ''}</p>
       <button className="st-button" disabled={blocked || !!unresolved.length} onClick={() => setDialog('finish')}>

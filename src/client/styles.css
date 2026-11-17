@@ -121,7 +121,11 @@
 .st-result { min-width: 0; }
 .st-result > .st-details { margin-top: 9px; }
 .st-metric-summary { gap: 6px; padding-block: 8px; }
-.st-metric-tail { border-top: 1px solid var(--st-border); margin-top: 12px; }
+.st-turn-tail { border-top: 1px solid var(--st-border); margin-top: 10px; padding-top: 6px; }
+.st-turn-tail .st-proof-link { color: var(--st-accent); font-size: 12px; min-height: 28px; }
+.st-turn-tail .st-proof-link:hover { text-decoration: underline; }
+.st-turn-tail .st-proof-link:disabled { opacity: .55; cursor: wait; }
+.st-definition-confirm { border: 1px solid var(--st-border); border-radius: 8px; padding: 10px 12px; margin-block: 5px; display: grid; gap: 6px; }
 .st-result > .st-button { margin-block: 8px; }
 .st-result-sql {
   flex: 1 1 180px;
@@ -150,6 +154,7 @@
 .st-history button { display: flex; align-items: center; gap: 10px; padding: 10px 6px; border-bottom: 1px solid var(--st-border); min-width: 0; text-align: left; }
 .st-history button:hover { background: var(--st-hover); }
 .st-history code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.st-record-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .st-history time { color: var(--st-secondary); font-size: 11px; white-space: nowrap; }
 .st-run-source { max-width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 
@@ -192,6 +197,11 @@
 .st-task-result .st-source-row > div { min-width: 0; }
 .st-section-heading, .st-task-footer { justify-content: space-between; }
 .st-task-footer { border-top: 1px solid var(--st-border); padding-block: 14px; }
+.st-catalog-groups section, .st-branch-group { gap: 8px; }
+.st-branch-heading { padding-inline: 2px; }
+.st-related-plans .st-button { white-space: normal; text-align: start; }
+.st-plan-summary { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px !important; }
+.st-run-details > summary { color: var(--st-fg); }
 
 .st-dialog {
   width: min(580px, calc(100vw - 30px));

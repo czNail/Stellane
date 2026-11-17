@@ -26,15 +26,15 @@ Expect **North 4, South 1, total 5**. In **Data catalog → Relationships and li
 
 ## 2. Save a confirmed business term and open a new chat
 
-Go to **Data catalog → Definitions → Add definition**. Name it “Countable event”, select `stellane_demo_telemetry.event_log` as the table, and set the source to “Demo rules”. Enter this definition:
+In the same chat, ask:
 
-> A countable event is a row with `state = 'active'`. Each row is one event, its reading comes from `magnitude`, and each row counts once.
+> Remember “Countable event”. It is a row in `stellane_demo_telemetry.event_log` with `state = 'active'`. Each row is one event and its reading comes from `magnitude`.
 
-Save it and start another chat in the same project:
+In the source build, check the definition and table below the answer, then click **Save definition**. With npm `0.1.0`, enter the same definition and select the table in **Data catalog → Definitions → Add definition**. Start another chat in the same project:
 
 > Sum the readings of countable events by area. Use the saved definition, recheck the joins we found earlier, and show the query evidence.
 
-Expect **North 110, South 40, total 150**. The definition tells the agent which rows and field to use. The verified joins help it find the area. In this version, a user saves the business term and the agent can verify and save joins.
+Expect **North 110, South 40, total 150**. The definition tells the agent which rows and field to use. The verified joins help it find the area.
 
 ## 3. Change the data and see where the saved join fails
 
