@@ -64,13 +64,13 @@ Stellane 使用提供方的数据库分支能力。Stello 提供固定数据切�
 
 当前版本为 **0.3.0-preview.1**。需要 Node.js **24.9+**、已能正常聊天的 DSH **0.2.2-rc.1 至 rc.3**，面板面向 Harness Web。预览安装包包含构建产物，使用者不需要先下载源码或安装编译器。
 
-将收到的预览 `.tgz` 安装包路径替换为本机真实绝对路径：
+从 [GitHub 预览发布页](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1)下载 `.tgz` 安装包，用本机的实际绝对路径安装。
 
 ```sh
 dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
 ```
 
-然后重启同一个 Web Host，从侧栏打开 Stellane。终端启动的 Host 停止后可重新运行 `dsh web`；远端使用 `dsh web --no-open` 和原有访问方式。这里不假定预览包已经发布到 npm。
+然后重启同一个 Web Host，从侧栏打开 Stellane。终端启动的 Host 停止后可重新运行 `dsh web`；远端使用 `dsh web --no-open` 和原有访问方式。
 
 界面支持中文和英文，可在面板切换。状态目录、升级备份和卸载步骤见[安装与维护指南](docs/install-and-maintain.zh-CN.md)。当前真实运行验收环境为 Linux，其他操作系统仍需各自完成端到端验证。
 

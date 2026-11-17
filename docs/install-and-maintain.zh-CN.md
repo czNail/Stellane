@@ -6,7 +6,7 @@
 
 需要 Node.js **24.9+**、DSH **0.2.2-rc.1–rc.3** Web，以及已能正常聊天的模型配置。当前版本为 **0.3.0-preview.1**。Linux 是当前真实运行验收环境，其他系统仍需单独验证。
 
-下载本版本提供的预览压缩包，其中已包含构建好的 Host、界面、Skill 与演示数据，安装者无需编译。本仓库不表示该版本已经发布到 npm。
+从 [GitHub 预览发布页](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1)下载压缩包，其中包含构建好的 Host、界面、Skill 与演示数据。
 
 ```sh
 dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz

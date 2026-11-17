@@ -6,7 +6,7 @@
 
 Use Node.js **24.9+**, a DSH **0.2.2-rc.1–rc.3** Web profile and a working model connection in DSH. This is **0.3.0-preview.1**. Linux is the current real-runtime validation environment; do not assume other platforms have passed the same tests.
 
-Download the preview archive supplied for this version. It contains built Host/client code, the Skill and demo data; there is no build step for package users. This release is not claimed to be published to npm.
+Download the archive from the [GitHub preview release](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1). It contains built Host and client code, the Skill and demo data.
 
 ```sh
 dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz

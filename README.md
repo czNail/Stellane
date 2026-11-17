@@ -64,13 +64,13 @@ Stellane uses the provider's database branching rather than implementing its own
 
 Version **0.3.0-preview.1** targets Harness Web with Node.js **24.9+** and DSH **0.2.2-rc.1 through rc.3**. Start with a DSH profile whose model connection already works. The preview archive contains built code; users do not need a compiler or a checkout.
 
-Install the `.tgz` supplied with this preview, using its actual absolute path:
+Download the `.tgz` from the [GitHub preview release](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1) and install it using its actual absolute path:
 
 ```sh
 dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
 ```
 
-Restart the same Web Host, then open Stellane from the sidebar. If you launch it in a terminal, stop that Host and run `dsh web`; for a remote Host use `dsh web --no-open` and your existing access method. This repository does not claim that the preview is already published to npm.
+Restart the same Web Host, then open Stellane from the sidebar. If you launch it in a terminal, stop that Host and run `dsh web`; for a remote Host use `dsh web --no-open` and your existing access method.
 
 The interface supports English and Chinese, with a language selector in the panel. See [installation and maintenance](docs/install-and-maintain.md) for state locations, upgrade backups and removal. Linux is the current real-runtime validation environment; other operating systems still need their own end-to-end validation.
 
