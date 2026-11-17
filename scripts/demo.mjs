@@ -23,20 +23,20 @@ const containerName = owner;
 const volumeName = `${owner}-data`;
 const database = 'stellane_demo';
 const role = 'stellane_demo_reader';
-const datasets = ['telemetry', 'support'];
+const datasetName = 'telemetry';
 const command = process.argv[2] ?? 'help';
 const selected = process.argv[3];
-const help = `Stellane synthetic demos (Docker + PostgreSQL 17)
+const help = `Stellane telemetry demo (Docker + PostgreSQL 17)
 
   ${entry} start                 Create or resume the private demo database
-  ${entry} status                Show the project, connection file and data stages
+  ${entry} status                Show the project, connection file and data stage
   ${entry} url                   Print the local demo connection URL for pasting
-  ${entry} verify [dataset]      Compare live data with the independent expectations
-  ${entry} drift [dataset]       Break one known relationship (default: telemetry)
-  ${entry} reset                 Restore both synthetic datasets; old memories become stale
+  ${entry} verify                Compare live data with the independent expectations
+  ${entry} drift                 Break one known relationship
+  ${entry} reset                 Restore the synthetic data; old memories become stale
   ${entry} stop                  Stop this demo container; retain its data
 
-Datasets: telemetry, support. Only this helper's labeled container and demo schemas are changed.
+Only this helper's labeled container and demo schemas are changed.
 Guide: ${guide} (Chinese: README.zh-CN.md alongside it).`;
 
 function docker(args, options = {}) {
@@ -74,9 +74,8 @@ function saveProvision(status) {
 function sql(statement) {
   return docker(['exec', '-i', containerName, 'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', database], { input: statement });
 }
-function dataset(name) {
-  if (!datasets.includes(name)) throw new Error('Dataset must be telemetry or support.');
-  const directory = join(root, 'examples', 'datasets', name);
+function dataset() {
+  const directory = join(root, 'examples', 'datasets', datasetName);
   const manifest = JSON.parse(readFileSync(join(directory, 'manifest.json'), 'utf8'));
   if (!/^stellane_demo_[a-z]+$/.test(manifest.schema)) throw new Error('Invalid demo schema.');
   return { manifest, read: file => readFileSync(join(directory, file), 'utf8') };
@@ -84,10 +83,8 @@ function dataset(name) {
 const literal = text => `'${text.replaceAll("'", "''")}'`;
 function version() {
   const hash = createHash('sha256');
-  for (const name of datasets) {
-    const data = dataset(name);
-    for (const file of ['manifest.json', 'setup.sql', 'drift.sql', 'variant-a.sql', 'variant-b.sql']) hash.update(data.read(file));
-  }
+  const data = dataset();
+  for (const file of ['manifest.json', 'setup.sql', 'drift.sql', 'variant-a.sql', 'variant-b.sql']) hash.update(data.read(file));
   return hash.digest('hex');
 }
 function metadata() {
@@ -100,7 +97,7 @@ function metadata() {
 }
 function current() {
   const meta = metadata();
-  if (!meta || meta.version !== version()) throw new Error(`Demo files and database differ. Run ${entry} reset to recreate only the two synthetic schemas.`);
+  if (!meta || meta.version !== version()) throw new Error(`Demo files and database differ. Run ${entry} reset to restore the demo data, then ${entry} start.`);
   return meta;
 }
 function seed(reset) {
@@ -109,24 +106,26 @@ function seed(reset) {
   const statements = ['BEGIN;'];
   if (!previous) statements.push(`CREATE TABLE public.stellane_demo_metadata (
     singleton boolean PRIMARY KEY CHECK (singleton), owner text NOT NULL, version text NOT NULL, phases jsonb NOT NULL);`);
-  for (const name of datasets) {
-    const data = dataset(name);
-    if (reset) statements.push(`DROP SCHEMA IF EXISTS ${data.manifest.schema} CASCADE;`);
-    statements.push(data.read('setup.sql'));
-    statements.push(`GRANT USAGE ON SCHEMA ${data.manifest.schema} TO ${role};
-      GRANT SELECT ON ALL TABLES IN SCHEMA ${data.manifest.schema} TO ${role};`);
+  const data = dataset();
+  if (reset) {
+    statements.push(`DROP SCHEMA IF EXISTS ${data.manifest.schema} CASCADE;`);
+    // Older owned demo instances also seeded the support fixture. Retire it on explicit reset.
+    if (Object.hasOwn(previous.phases, 'support')) statements.push('DROP SCHEMA IF EXISTS stellane_demo_support CASCADE;');
   }
+  statements.push(data.read('setup.sql'));
+  statements.push(`GRANT USAGE ON SCHEMA ${data.manifest.schema} TO ${role};
+    GRANT SELECT ON ALL TABLES IN SCHEMA ${data.manifest.schema} TO ${role};`);
   statements.push(`INSERT INTO public.stellane_demo_metadata VALUES (true, ${literal(owner)}, ${literal(version())},
-    '{"telemetry":"baseline","support":"baseline"}') ON CONFLICT (singleton) DO UPDATE SET version=EXCLUDED.version, phases=EXCLUDED.phases; COMMIT;`);
+    '{"telemetry":"baseline"}') ON CONFLICT (singleton) DO UPDATE SET version=EXCLUDED.version, phases=EXCLUDED.phases; COMMIT;`);
   sql(statements.join('\n'));
 }
-function check(name, meta = current()) {
-  const data = dataset(name);
-  const stage = meta.phases[name];
+function check(meta = current()) {
+  const data = dataset();
+  const stage = meta.phases[datasetName];
   const query = data.manifest.metricSql.trim().replace(/;\s*$/, '');
   const rows = JSON.parse(sql(`SELECT COALESCE(json_agg(r),'[]') FROM (${query}) r`));
-  assert.deepEqual(rows, data.manifest.expected[stage], `${name}: data does not match the last managed stage ${stage}`);
-  console.log(JSON.stringify({ dataset: name, stage, verified: true, rows }, null, 2));
+  assert.deepEqual(rows, data.manifest.expected[stage], `${datasetName}: data does not match the last managed stage ${stage}`);
+  console.log(JSON.stringify({ dataset: datasetName, stage, verified: true, rows }, null, 2));
 }
 function show(info) {
   console.log(`Demo ${info?.State.Running ? 'running' : 'stopped'}.\nProject: ${project}\nConnection URL file: ${join(state, 'connection-url.txt')}\nCopy with: ${entry} url\nGuide: ${guide}`);
@@ -139,7 +138,7 @@ async function main() {
   if (['help', '--help', '-h'].includes(command)) { console.log(help); return; }
   if (!['start', 'status', 'url', 'verify', 'drift', 'reset', 'stop'].includes(command)
     || process.argv.length > 4 || selected && !['verify', 'drift'].includes(command)) throw new Error(help);
-  if (selected && !datasets.includes(selected)) throw new Error('Dataset must be telemetry or support.');
+  if (selected && selected !== datasetName) throw new Error('The demo dataset is telemetry.');
   try { docker(['info', '--format', '{{.ServerVersion}}']); }
   catch { throw new Error('Docker is unavailable. Start Docker and make sure this user can access it, then retry.'); }
   let info = inspect('container', containerName);
@@ -203,22 +202,26 @@ async function main() {
       database, user: role, passwordRef: `file:${passwordFile}`, tls: 'disable' };
     writeFileSync(join(state, 'connection.json'), JSON.stringify(connection, null, 2) + '\n', { mode: 0o600 });
     writeFileSync(join(state, 'connection-url.txt'), `postgresql://${role}:${password}@127.0.0.1:${port}/${database}?sslmode=disable\n`, { mode: 0o600 });
-    for (const name of datasets) check(name, meta);
+    check(meta);
     saveProvision('ready');
     show(info);
     return;
   }
   if (!info?.State.Running) throw new Error(`Start the private demo with ${entry} start first.`);
   if (command === 'url') { console.log(readFileSync(join(state, 'connection-url.txt'), 'utf8').trim()); return; }
-  if (command === 'reset') { seed(true); for (const name of datasets) check(name); console.log('Both synthetic schemas reset. Previously saved observations must be checked again.'); return; }
+  if (command === 'reset') {
+    seed(true);
+    check();
+    console.log('Synthetic data restored. Previously saved observations must be checked again.');
+    return;
+  }
   const meta = current();
   if (command === 'drift') {
-    const name = selected ?? 'telemetry';
-    sql(`BEGIN;\n${dataset(name).read('drift.sql')}\nUPDATE public.stellane_demo_metadata
-      SET phases=jsonb_set(phases, '{${name}}', '"drift"'); COMMIT;`);
-    check(name);
-    console.log(`One ${name} relationship changed. Open a new ordinary chat and ask the same metric again.`);
-  } else for (const name of selected ? [selected] : datasets) check(name, meta);
+    sql(`BEGIN;\n${dataset().read('drift.sql')}\nUPDATE public.stellane_demo_metadata
+      SET phases=jsonb_set(phases, '{telemetry}', '"drift"'); COMMIT;`);
+    check();
+    console.log('One telemetry relationship changed. Open a new ordinary chat and ask the same metric again.');
+  } else check(meta);
 }
 
 try { await main(); }

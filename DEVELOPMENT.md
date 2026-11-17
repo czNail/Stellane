@@ -216,7 +216,7 @@ corepack pnpm demo url
 corepack pnpm demo status
 ```
 
-按输出接入私有连接 URL，并在输出的项目目录新建普通对话。跟随演示指南逐步提问。用 `pnpm demo drift telemetry` 制造受控变化，再到新对话验证旧关系是否被复核。用 `pnpm demo verify telemetry` 核对样例数值，在面板另行检查 Agent 实际使用的关系和证据。
+按输出接入私有连接 URL，并在输出的项目目录新建普通对话。跟随演示指南逐步提问。用 `pnpm demo drift` 制造受控变化，再到新对话验证旧关系是否被复核。用 `pnpm demo verify` 核对样例数值，在面板另行检查 Agent 实际使用的关系和证据。
 
 `pnpm demo reset` 只重建演示 schema，`pnpm demo stop` 停止演示容器并保留数据。重新 `start` 可恢复原数据。这些命令与 `dev:db` 各自管理带所属标记的资源，不能混用两者的连接文件。
 
@@ -228,7 +228,7 @@ corepack pnpm test:demo
 corepack pnpm dev:db stop
 ```
 
-测试读取 `examples/datasets/` 下的初始化、受控变更、A/B 方案 SQL 和 `manifest.json`，核对[事件](examples/datasets/telemetry/README.md)与[工单](examples/datasets/support/README.md)样例的指标、视图血缘、跨对话与重启后的记忆检索，以及变更后的旧关系失效。测试只清理自己成功创建的 schema；若同名 schema 已存在则拒绝覆盖。
+测试读取 `examples/datasets/telemetry/` 的初始化、受控变更、A/B 方案 SQL 和 `manifest.json`，核对指标、视图血缘、跨对话与重启后的记忆检索，以及变更后的旧关系失效。测试只清理自己成功创建的 schema。若同名 schema 已存在，测试会拒绝覆盖。
 
 此处用事务回滚分别核对 A/B SQL 的数值，不把它视为数据库分支隔离验收。`test:integration` 已包含这组测试，只有单独检查演示数据时才需要再运行 `test:demo`。
 
@@ -242,10 +242,17 @@ psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/telemetry/dri
 
 mkdir -p "$HOME/Temp/stellane-branches"
 run_dir="$HOME/Temp/stellane-branches/telemetry-$(date +%Y%m%d-%H%M%S)"
-corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset telemetry --state-dir "$run_dir"
+corepack pnpm demo:branches --stello /absolute/path/provider.json --state-dir "$run_dir"
 ```
 
-验收时核对两项任务引用同一基线、A 的写入不改变 B、两份结果使用同一口径，以及来源数据指纹保持一致。[样例预期值](examples/datasets/telemetry/README.md)列出了各分支补齐关联后，读数如何分别归入 North 或 South。脚本直接调用 Core 并使用已知方案 SQL，验证的是分支状态与结果。
+验收时核对两项任务引用同一基线、A 的写入不改变 B、两份结果使用同一口径，以及来源数据指纹保持一致。脚本直接调用 Core 并使用已知方案 SQL，验证的是分支状态与结果。各组的结果为事件数 / 读数合计。
+
+| 阶段 | North | South | 未归因 | 合计 |
+| --- | --- | --- | --- | --- |
+| 导入 `setup.sql` | 4 / 110 | 1 / 40 | 0 / 0 | 5 / 150 |
+| 执行 `drift.sql` 后的共同基线 | 3 / 90 | 1 / 40 | 1 / 20 | 5 / 150 |
+| A 将事件 2 关联至 `device-a` | 4 / 110 | 1 / 40 | 0 / 0 | 5 / 150 |
+| B 将事件 2 关联至 `device-c` | 3 / 90 | 2 / 60 | 0 / 0 | 5 / 150 |
 
 成功运行会打印私有状态目录，保留报告、结果和共享基线。报告使用独立 Core 状态，不会自动进入现有 DSH 面板。检查后显式清理本次记录的资源：
 

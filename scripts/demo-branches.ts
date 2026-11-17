@@ -13,20 +13,21 @@ import type { Actor, BranchRemoval, Cell, Environment, Run } from '../src/shared
 import type { NeonRemoval } from '../src/shared/neon-models.ts';
 
 const repository = dirname(dirname(fileURLToPath(import.meta.url)));
+const datasetName = 'telemetry';
 const { values, positionals } = parseArgs({ options: {
-  stello: { type: 'string' }, neon: { type: 'string' }, dataset: { type: 'string', default: 'telemetry' },
+  stello: { type: 'string' }, neon: { type: 'string' }, dataset: { type: 'string', default: datasetName },
   'state-dir': { type: 'string' }, help: { type: 'boolean' },
 }, allowPositionals: true });
 const command = positionals[0] ?? 'run';
 if (values.help) {
   console.log(`Usage:
-  pnpm demo:branches --stello /absolute/provider.json --dataset telemetry
-  pnpm demo:branches --neon /absolute/source.json --dataset support
+  pnpm demo:branches --stello /absolute/provider.json
+  pnpm demo:branches --neon /absolute/source.json
   pnpm demo:branches status --state-dir /absolute/run-directory
   pnpm demo:branches reconcile --state-dir /absolute/run-directory
   pnpm demo:branches cleanup --state-dir /absolute/run-directory
 
-Use a dedicated synthetic source loaded with setup.sql and drift.sql first.
+Use a dedicated source loaded with the telemetry setup.sql and drift.sql first.
 The run creates one shared baseline and two independent experiments; source data stays read-only.
 Results are retained until cleanup. Neon resources may incur charges.
 This deterministic check uses Stellane Core; it is not a model conversation.`);
@@ -37,7 +38,6 @@ if (!['run', 'status', 'reconcile', 'cleanup'].includes(command) || positionals.
 type Rows = Record<string, Cell>[];
 interface Manifest {
   name: string; schema: string; metricSql: string; fingerprintSql: string;
-  capacitySql?: string; expectedCapacity?: { variantA: Rows; variantB: Rows };
   expected: { baseline: Rows; drift: Rows; variantA: Rows; variantB: Rows };
 }
 interface Variant {
@@ -102,8 +102,8 @@ function originalRemoval(directory: string, environment: Environment): BranchRem
 
 async function runDemo() {
   if (!!values.stello === !!values.neon) throw new Error('Choose exactly one --stello or --neon configuration.');
-  if (!['telemetry', 'support'].includes(values.dataset!)) throw new Error('Dataset must be telemetry or support.');
-  const datasetDirectory = join(repository, 'examples', 'datasets', values.dataset!);
+  if (values.dataset !== datasetName) throw new Error('The branch demo dataset is telemetry.');
+  const datasetDirectory = join(repository, 'examples', 'datasets', datasetName);
   const manifest = JSON.parse(await readFile(join(datasetDirectory, 'manifest.json'), 'utf8')) as Manifest;
   const configuration = JSON.parse(await readFile(resolve(values.stello ?? values.neon!), 'utf8'));
   const staging = join(repository, '.stellane-dev');
@@ -111,7 +111,7 @@ async function runDemo() {
   const directory = values['state-dir'] ? resolve(values['state-dir']) : await mkdtemp(join(staging, 'branch-demo-'));
   if (values['state-dir']) await mkdir(directory, { mode: 0o700 }); // Existing state is never reused as a new run.
   const release = await lock(directory);
-  const report: Report = { version: 1, kind: 'deterministic-core-branch-demo', dataset: values.dataset!,
+  const report: Report = { version: 1, kind: 'deterministic-core-branch-demo', dataset: datasetName,
     provider: values.stello ? 'stello' : 'neon', stateDirectory: directory, startedAt: new Date().toISOString(),
     status: 'running', variants: [], checks: [], cleaned: [], removals: {} };
   await save(directory, report);
@@ -127,7 +127,7 @@ async function runDemo() {
       'Source does not match the synthetic drift scenario. Load setup.sql and drift.sql into a dedicated source first.');
     report.checks.push('Source matches the published drift-scenario totals before branching');
 
-    const baseline = await core.derive('checkpoint', { environmentId: source.id, name: `${values.dataset} shared baseline` },
+    const baseline = await core.derive('checkpoint', { environmentId: source.id, name: `${datasetName} shared baseline` },
       { ...owner, callId: `shared-baseline-${randomUUID()}` });
     report.baselineId = baseline.id;
     await save(directory, report);
@@ -142,7 +142,7 @@ async function runDemo() {
     const actors = new Map<string, Actor>();
     for (const name of ['A', 'B'] as const) {
       const actor: Actor = { kind: 'agent', id: `demo-${name}-${randomUUID()}`, projectPath: source.projectPath, callId: `start-${name}` };
-      const detail = await core.startConversationExperiment({ environmentId: baseline.id, name: `${values.dataset} path ${name}` }, actor);
+      const detail = await core.startConversationExperiment({ environmentId: baseline.id, name: `${datasetName} path ${name}` }, actor);
       if (detail.experiment.status !== 'active' || !detail.work) throw new Error(detail.experiment.error ?? 'Experiment preparation did not finish.');
       assert.equal(detail.baseline?.id, baseline.id);
       report.variants.push({ name, experimentId: detail.experiment.id, baselineId: baseline.id, workId: detail.work.id });
@@ -174,12 +174,6 @@ async function runDemo() {
       await save(directory, report);
       assert.deepEqual(variant.rows, variant.name === 'A' ? manifest.expected.variantA : manifest.expected.variantB);
       variant.fingerprintRunId = (await query(core, result.result.id, manifest.fingerprintSql)).id;
-      if (manifest.capacitySql && manifest.expectedCapacity) {
-        const capacity = await query(core, result.result.id, manifest.capacitySql);
-        assert.deepEqual(capacity.preview!.rows, variant.name === 'A' ? manifest.expectedCapacity.variantA : manifest.expectedCapacity.variantB);
-        variant.capacityRows = capacity.preview!.rows;
-        variant.capacityRunId = capacity.id;
-      }
       const finished = await core.finishExperiment(variant.experimentId, undefined, actor);
       assert.equal(finished.experiment.status, 'closed', finished.experiment.error);
       variant.retentionNote = finished.experiment.retentionNote;

@@ -41,7 +41,7 @@ dsh plugin --profile web exec stellane-demo url
 保留连接和上述记录，在同一终端执行：
 
 ```sh
-dsh plugin --profile web exec stellane-demo drift telemetry
+dsh plugin --profile web exec stellane-demo drift
 ```
 
 再新开一个普通对话：
@@ -65,10 +65,12 @@ dsh plugin --profile web exec stellane-demo drift telemetry
 ## 演示结束后
 
 ```sh
-dsh plugin --profile web exec stellane-demo verify telemetry
+dsh plugin --profile web exec stellane-demo verify
 dsh plugin --profile web exec stellane-demo stop
 ```
 
 `verify` 核对当前样例的预期结果。`stop` 停止容器并保留数据，`start` 可以继续。若要从头重做，用 `reset` 恢复演示表，再重新验证关系。在新终端使用同一个 `STELLANE_DEMO_HOME`。
 
-[样例数据和预期值](datasets/telemetry/README.md) · [0.1 演示验收记录](../docs/release-status.zh-CN.md)
+恢复旧版的双数据集演示时，按提示运行 `reset`，再运行 `start`。这会还原事件样例，并从该演示库删除旧工单样例。
+
+[分支验收和预期值](../DEVELOPMENT.md#真实分支对照) · [0.1 演示验收记录](../docs/release-status.zh-CN.md)

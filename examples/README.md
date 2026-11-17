@@ -41,7 +41,7 @@ Expect **North 110, South 40, total 150**. The definition tells the agent which 
 Keep the connection and saved records. In the same terminal, run:
 
 ```sh
-dsh plugin --profile web exec stellane-demo drift telemetry
+dsh plugin --profile web exec stellane-demo drift
 ```
 
 In another new chat, ask:
@@ -65,10 +65,12 @@ The detail table still has **5 events and 150 units**. The view shows **4 and 13
 ## Finish the demo
 
 ```sh
-dsh plugin --profile web exec stellane-demo verify telemetry
+dsh plugin --profile web exec stellane-demo verify
 dsh plugin --profile web exec stellane-demo stop
 ```
 
 `verify` checks the expected values for the fixture's current state. `stop` keeps the data for the next `start`. Use `reset` to restore the demo tables, then recheck saved relationships. Use the same `STELLANE_DEMO_HOME` in a new terminal.
 
-[Fixture and expected values](datasets/telemetry/README.md) · [0.1 verification results](../docs/release-status.md)
+If you resume an older demo with two datasets, run `reset` when prompted, then `start` again. This resets telemetry and removes the retired support fixture from that demo database.
+
+[Branch verification and expected values](../DEVELOPMENT.md#真实分支对照) · [0.1 verification results](../docs/release-status.md)

@@ -24,7 +24,8 @@ const entries = run('tar', ['-tzf', archive]).trim().split('\n');
 for (const path of ['dist/host.js', 'dist/client.js', 'dist/demo-branches.js', 'stellane.patch.yml', 'scripts/demo.mjs',
   'scripts/dev-neon.mjs', 'scripts/neon-local-controller.mjs', 'scripts/neon-local-runtime.mjs',
   'CHANGELOG.md', 'SECURITY.md', 'docs/install-and-maintain.md', 'docs/local-neon.md',
-  'docs/data-and-privacy.md', 'examples/datasets/telemetry/manifest.json', 'examples/datasets/support/manifest.json']) {
+  'docs/data-and-privacy.md', 'examples/README.md', 'examples/README.zh-CN.md',
+  ...['manifest.json', 'setup.sql', 'drift.sql', 'variant-a.sql', 'variant-b.sql'].map(name => `examples/datasets/telemetry/${name}`)]) {
   assert(entries.includes(`package/${path}`), `Release asset missing: ${path}`);
 }
 assert(entries.every(path => path.startsWith('package/') && !path.split('/').includes('..')));
