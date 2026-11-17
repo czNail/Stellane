@@ -197,7 +197,7 @@ Agent 身份、调用 ID 和项目目录来自 Harness 执行上下文；Core �
 
 ## 演示数据与多路径验收
 
-面向使用者的完整演示见[中文步骤](examples/README.zh-CN.md) / [English walkthrough](examples/README.md)；共同基线、A/B 分支和资源收尾见[多路径试验指南](docs/experiments.zh-CN.md) / [English experiment guide](docs/experiments.md)。演示覆盖设备事件与服务工单两种合成场景，表结构与规则只存在于样例中。
+想在 DSH 里体验关系复用和失效复核，从[可运行演示](examples/README.zh-CN.md)开始。想判断业务改动是否值得用分支，见[订单去重预演](docs/experiments.zh-CN.md)。下面用带固定预期的合成数据验证功能，测试规则都随样例发布。
 
 三个入口服务于不同的验证目的：
 
@@ -210,12 +210,13 @@ Agent 身份、调用 ID 和项目目录来自 Harness 执行上下文；Core �
 ### 普通对话演练
 
 ```sh
+export STELLANE_DEMO_HOME="$HOME/Temp/stellane-demo"
 corepack pnpm demo start
 corepack pnpm demo url
 corepack pnpm demo status
 ```
 
-按输出接入私有连接 URL，并在输出的项目目录新建普通对话。跟随演示指南逐步提问；用 `pnpm demo drift telemetry` 或 `pnpm demo drift support` 制造受控变化，再到新对话验证旧关系是否被复核。`pnpm demo verify` 对照数据文件的独立预期，不替代观察 Agent 的工具调用和面板证据。
+按输出接入私有连接 URL，并在输出的项目目录新建普通对话。跟随演示指南逐步提问。用 `pnpm demo drift telemetry` 制造受控变化，再到新对话验证旧关系是否被复核。用 `pnpm demo verify telemetry` 核对样例数值，在面板另行检查 Agent 实际使用的关系和证据。
 
 `pnpm demo reset` 只重建演示 schema，`pnpm demo stop` 停止演示容器并保留数据。重新 `start` 可恢复原数据。这些命令与 `dev:db` 各自管理带所属标记的资源，不能混用两者的连接文件。
 
@@ -227,21 +228,24 @@ corepack pnpm test:demo
 corepack pnpm dev:db stop
 ```
 
-测试读取 `examples/datasets/` 下的初始化、受控变更、A/B 方案 SQL 和 `manifest.json`，检查两套数据的预期指标、视图血缘、跨对话与重启后的记忆检索，以及变更后的旧关系失效。测试只清理自己成功创建的 schema；若同名 schema 已存在则拒绝覆盖。
+测试读取 `examples/datasets/` 下的初始化、受控变更、A/B 方案 SQL 和 `manifest.json`，核对[事件](examples/datasets/telemetry/README.md)与[工单](examples/datasets/support/README.md)样例的指标、视图血缘、跨对话与重启后的记忆检索，以及变更后的旧关系失效。测试只清理自己成功创建的 schema；若同名 schema 已存在则拒绝覆盖。
 
 此处用事务回滚分别核对 A/B SQL 的数值，不把它视为数据库分支隔离验收。`test:integration` 已包含这组测试，只有单独检查演示数据时才需要再运行 `test:demo`。
 
 ### 真实分支对照
 
-先按[分支试验指南](docs/experiments.zh-CN.md#准备演示库)将合成数据装入专用测试来源，再应用同一数据集的 `drift.sql`。导入的文件和下面的 `--dataset` 要选同一个数据集。在 `~/Temp` 的测试检出里构建后执行：
+准备[专用 Stello 测试来源](#stello)。在 `~/Temp` 的独立检出构建 Stellane，用有建表权限的测试连接执行下面的命令。把 `stellane_demo` 换成已在本地配置的 psql 服务名。初始化文件创建专用 schema，第二条导入会把事件 2 的设备标识换成无法匹配的值。
 
 ```sh
+psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/telemetry/setup.sql
+psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/telemetry/drift.sql
+
 mkdir -p "$HOME/Temp/stellane-branches"
-run_dir="$HOME/Temp/stellane-branches/support-$(date +%Y%m%d-%H%M%S)"
-corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset support --state-dir "$run_dir"
+run_dir="$HOME/Temp/stellane-branches/telemetry-$(date +%Y%m%d-%H%M%S)"
+corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset telemetry --state-dir "$run_dir"
 ```
 
-验收时只保存一次共享基线，再从这个确切环境创建独立 A/B 分支。检查两项任务引用同一基线、A 的写入不改变 B、两份结果使用同一指标口径，并对照来源数据指纹确认来源未变。工单场景还比较容量约束，不能只因为关联覆盖完整就认定方案更好。脚本直接调用 Core 并使用已知方案 SQL，不能作为 Agent 自主发现或模型对话通过的证明；面板交互需另按普通对话步骤验收。
+验收时核对两项任务引用同一基线、A 的写入不改变 B、两份结果使用同一口径，以及来源数据指纹保持一致。[样例预期值](examples/datasets/telemetry/README.md)列出了各分支补齐关联后，读数如何分别归入 North 或 South。脚本直接调用 Core 并使用已知方案 SQL，验证的是分支状态与结果。
 
 成功运行会打印私有状态目录，保留报告、结果和共享基线。报告使用独立 Core 状态，不会自动进入现有 DSH 面板。检查后显式清理本次记录的资源：
 
@@ -259,6 +263,8 @@ corepack pnpm demo:branches reconcile --state-dir /absolute/path/printed-run-dir
 `reconcile` 只核对原操作。`reviewed` 表示已核对，可以回收，并不表示原实验通过。仍有未知结果时，检查提供方和原回执。清理中断后，再用同一目录执行 `cleanup`，沿用原删除记录。若崩溃留下 `runner.lock`，确认其中的进程已经退出后才可删除它。Core 的 `owner.sqlite` 保留。
 
 脚本按身份从子到父回收本次资源，保留来源库和本地证据。试验 Neon 时需要另行接入实验性分支提供方，参见[本地 Neon 指南](docs/local-neon.zh-CN.md)。
+
+要单独验证对话与面板，在 **数据源 → 添加数据源 → Stello** 填客户端配置文件、来源数据库和分支，再选 DSH 项目。在该项目的新对话里，让 Agent 从同一基线建两个实验，分别在各自分支把 `stellane_demo_telemetry` 的事件 2 归给 `device-a` 或 `device-c`，用同一查询汇总有效事件并保存证据。在 **任务与结果** 核对基线、SQL 和结果，完成后用 **管理与清理 → 保留的分支** 按依赖顺序回收。
 
 ## 检查与验收
 

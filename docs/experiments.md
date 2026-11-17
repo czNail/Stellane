@@ -1,63 +1,32 @@
-# Give each proposed change its own branch
+# Rehearse a duplicate-order repair on branches
 
-[中文](experiments.zh-CN.md) · [Investigate a missing record](../examples/README.md) · [Home](../README.md)
+[中文](experiments.zh-CN.md) · [Find and reuse a relationship](../examples/README.md) · [Home](../README.md)
 
-When several changes look plausible, save the starting data once as a **baseline**. Give each option a work branch from that baseline, apply its edits, and compare the results with the same query. Stellane treats the source as read-only.
+Suppose an import left duplicate historical orders. One record is newer, while another matches the payment ledger. Removing a duplicate changes more than the order table. You also need to decide where to point its payments and refunds, then check the reports that use those records.
 
-Say you are testing two assignments for the same ticket. Editing one database twice means you must undo the first change before testing the second. Starting twice from a live source allows new tickets to affect the comparison. Branches from one baseline give both options the same starting data and keep their edits separate.
+## Check the candidates before branching
 
-## Proposed workflow with one task and four subagents
+Start with read-only queries to list duplicate groups and see which rows each rule would keep. If all you need is a count or a comparison of filters, that can be enough. A transaction in a test database can also cover a small, immediate check. Branches are useful here because each proposal changes several tables, existing queries need to read the changed data, and a reviewer needs to reopen each result later.
 
-**This workflow is a design for the next step.** In 0.1, one ordinary chat can run several named experiments separately. Automatically launching four subagents, binding each to its work branch, and collecting their results still needs to be implemented.
+Use the PostgreSQL view dependencies to find the tables behind the reports you plan to check. Use business definitions for the order key and the payment and refund rules. Check the actual joins for missing orders and payments that would be counted more than once.
 
-Suppose one ticket has no team assigned. Each subagent would test a different assignment strategy.
+## Run two proposals from the same baseline
 
-| Subagent | Change on its own branch | Expected General / Specialist | What to check |
-| --- | --- | --- | --- |
-| A · Default queue | Send ticket 2 to General | **390 / 300**, 200 / 480 | General is over by 90 minutes |
-| B · Specialist handles it | Send ticket 2 to Specialist | 300 / 300, **290 / 480** | Specialist must be eligible |
-| C · Leave General 60 minutes spare | Send tickets 2 and 3 to Specialist | **240 / 300**, 350 / 480 | Specialist must be eligible for both |
-| D · Add temporary General capacity | Give General 90 extra minutes and ticket 2 | **390 / 390**, 200 / 480 | The additional capacity must be available |
+Save one read-only baseline and record the order range and reports to check. Create two Stello work branches from that baseline.
 
-All four count the same six open tickets and 590 minutes of work, including 90 minutes for ticket 2. The values in the table were checked with the sample SQL.
+| Experiment | Apply this change | Check this risk |
+| --- | --- | --- |
+| A · Keep the newest order | Pick the row by update time. Repoint payments and refunds, then remove the duplicate orders. | A retry may have created the newest row. Would this lose the payment status, channel or other attributes from the original order? |
+| B · Keep the order that reconciles to payment | Prefer the row that matches the payment ledger. Repoint references from the duplicate rows and flag groups that still conflict. | Which duplicates can be resolved automatically? Which groups still need a human decision? |
 
-```mermaid
-flowchart LR
-    P[Parent saves one baseline] --> A[Subagent A tries the default queue]
-    P --> B[Subagent B tries Specialist]
-    P --> C[Subagent C keeps spare capacity]
-    P --> D[Subagent D tries added capacity]
-    A --> E[Parent compares four results with the same query]
-    B --> E
-    C --> E
-    D --> E
-```
+Run the same checks on both branches. Count remaining duplicates, reconcile payments and refunds separately, look for broken references, and rerun the existing reports. Suppose the newest row says “organic” while the one that matches the payment says “paid ads.” The refund total can match on both branches while the channel report changes. Keep the edits and discrepancies so a reviewer can check the attribution before choosing a rule.
 
-The parent chooses the baseline, calculation and decision criteria. Each subagent works only in its assigned branch and returns the change, query result and business assumptions. The parent can show which options overload a team, reassign extra work or require added capacity. If one path fails, show its status and any evidence it produced while the other paths continue.
+## Try the workflow in 0.1
 
-## Try it now with one ticket and two assignments
+In an ordinary DSH chat, save one baseline and start named experiments from it. Apply each proposal one SQL step at a time. Save the results and evidence, then inspect them in **Activity and results**. When you no longer need retained results, remove them before their baseline in **Management → Retained branches**.
 
-Our synthetic queue has **6 open tickets and 590 minutes of planned work**. Ticket 2 needs **90 minutes** and has no team assigned. Where should it go?
+With a dedicated order test database, give the agent the confirmed duplicate rule, the allowed changes and the reports to check. For example:
 
-The baseline has General at 300 / 300 minutes and Specialist at 200 / 480. Use the A and B rows above to check where the 90 unassigned minutes go and whether General exceeds capacity.
+> Save one baseline of the test data. Compare keeping the newest order with keeping the order that reconciles to payment. Apply each repair only on its assigned branch. Repoint payment and refund references, then run the same checks and reports on both. Include the evidence for any ambiguous groups.
 
-### Prepare a dedicated demo source
-
-Use a **dedicated Stello test source**. From the checkout, load these files in order using a role that can create the demo schema. Replace the sample psql service `stellane_demo` with your configured test connection. The second file creates the unassigned ticket.
-
-```sh
-psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/support/setup.sql
-psql service=stellane_demo -v ON_ERROR_STOP=1 -f examples/datasets/support/drift.sql
-```
-
-Open **Stellane → Data sources → Add data source → Stello**. Enter the client configuration file, source database and branch, and choose your DSH project. If you need a test instance, follow the [Stello development setup](../DEVELOPMENT.md#stello).
-
-### Run the comparison in ordinary DSH chat
-
-> Use the Stello source with `stellane_demo_support`. Save one common baseline. From it, start two experiments called “A to General” and “B to Specialist”. In each branch, change only ticket 2's assignment. Use the same query to compare estimated minutes for open tickets with each team's capacity. Include unassigned work. Save each result and its SQL evidence, then finish the temporary work.
-
-Open the two experiments in **Stellane → Activity and results**. Check their common baseline, individual edits and evidence SQL. When done, remove saved results under **Management → Retained branches**, then follow the panel's guidance to remove the baseline.
-
-To continue the missing-record walkthrough, use the [telemetry data](../examples/datasets/telemetry/README.md). Both candidate repairs restore coverage, but one puts the missing 20 in North and the other in South. You still need evidence about which device produced the event.
-
-[Developer commands for reproducing and recovering experiments](../DEVELOPMENT.md#真实分支对照) · [0.1 verification](release-status.md)
+The order example shows how to design the rehearsal. The repository's [runnable branch walkthrough](../DEVELOPMENT.md#真实分支对照) uses a small fixture to check isolation, retained results and cleanup. Launching multiple subagents from one request and collecting their results is part of the [proposed product design](../PRODUCT.md#多个子代理怎样分工).

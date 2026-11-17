@@ -1,8 +1,8 @@
-# 跟着做一次数据排查
+# 查过一次，下次从已验证的关系接着查
 
-[English](README.md) · [安装 Stellane](../README.zh-CN.md#安装后直接提问) · [去试分支](../docs/experiments.zh-CN.md)
+[English](README.md) · [安装 Stellane](../README.zh-CN.md#安装后直接提问) · [分支预演](../docs/experiments.zh-CN.md)
 
-这次要查清一件事。**明细表有 150，报表为什么只算了 130？** 先复现一切正常时的报表，再让一条设备关联失效，看看 Stellane 能否指出漏掉的是哪条。这个演示使用 PostgreSQL 和合成数据。
+这个可运行的 PostgreSQL 样例有事件、设备、区域三张表，表之间没有外键。你会先找出事件怎样归到区域，再在新对话中使用已保存的关系和人工确认的业务口径，最后改一条样例数据，看旧关系怎样失效。
 
 ## 接入演示库
 
@@ -16,28 +16,29 @@ dsh plugin --profile web exec stellane-demo url
 
 1. 在 **Stellane → 数据源 → 添加数据源** 选择 **PostgreSQL**，粘贴第二条命令输出的连接 URL。
 2. 项目目录使用 `start` 输出的 **Project** 路径，名称可填 `Stellane demo`，然后点 **连接并开始使用**。
-3. 在连接卡片点 **在项目中提问**。后面另开会话时，选同一个 DSH 项目。
+3. 在连接卡片点 **在项目中提问**。另开对话时选同一个 DSH 项目。
 
-## 1. 看报表从哪来，核对它怎么关联
+## 1. 从问题出发，找表和关联
 
-> 使用 `stellane_demo_telemetry`。告诉我报表视图 `active_event_totals` 用了哪些表。另查明细表，按区域数一数 active 事件，核对关联覆盖，保存有证据的表关系。
+> 使用 `stellane_demo_telemetry`，按区域统计有效事件数。本例有效事件是状态为 active 的事件。请查清一条事件怎么找到所属区域，核对关联是否覆盖这些事件，保存查证过的关系。
 
-在 **数据目录 → 关系与血缘** 可以看到两类信息：
+预期为 **North 4 条、South 1 条，共 5 条**。在 **数据目录 → 关系与血缘** 看 Agent 查过的两段关联。事件里的设备标识要能找到设备，设备的区域标识要能找到区域。这些是对数据的实际检查，证据会说明检查范围内有多少行没匹配上。
 
-| 看哪里 | 回答什么 |
-| --- | --- |
-| `active_event_totals` 的视图血缘 | PostgreSQL 目录记录了视图引用的表和字段。这个视图用到事件表 `event_log`、设备表 `device_inventory` 和区域表 `zone_registry`。 |
-| 已验证的关联 | 查实际数据，看看事件的设备标识能否匹配设备表，设备的区域标识能否匹配区域表。这套数据未声明外键，所以这些发现来自数据检查。 |
+## 2. 存下确认过的业务词，再开一个对话
 
-预期结果为 **North 4 条、South 1 条，共 5 条**。在同一项目新开一个对话：
+进入 **数据目录 → 业务说明 → 添加说明**。说明名称填「可计量事件」，数据表选 `stellane_demo_telemetry.event_log`，说明来源填「演示口径」。在「含义与计算口径」填：
 
-> 用上次查到的关联按区域统计 active 事件的 magnitude 合计，请先复核关系现在是否适用。
+> 可计量事件是 `state = 'active'` 的事件。一条记录代表一次事件，读数取 `magnitude`，每条记录只计一次。
 
-预期为 **North 110、South 40，共 150**。这次对话可以从已保存的两段关联继续，先检查再使用。
+保存后另开同项目的对话：
 
-## 2. 改一条记录，看看报表少了什么
+> 按区域汇总可计量事件的读数。使用已保存的业务说明，先核对上次查明的关系，再给我查询依据。
 
-保留连接和已查到的关系，在同一终端运行：
+预期为 **North 110、South 40，共 150**。业务说明告诉它要找哪些行、用哪个字段。已验证的关系帮助它找到区域。这一版由用户保存业务词，Agent 可以验证并保存关联。
+
+## 3. 数据变了，看旧经验哪里失效
+
+保留连接和上述记录，在同一终端执行：
 
 ```sh
 dsh plugin --profile web exec stellane-demo drift telemetry
@@ -45,34 +46,21 @@ dsh plugin --profile web exec stellane-demo drift telemetry
 
 再新开一个普通对话：
 
-> 在 `stellane_demo_telemetry` 里，比较 `active_event_totals` 和从明细统计的 active 事件数及 magnitude 合计。用 Stellane 的指标检查列出无法归属的记录，说明在哪一步少算，并给我可打开的证据。
+> 核对 `active_event_totals` 和明细里可计量事件的总数、读数合计。用 Stellane 的指标检查列出未归因的记录，告诉我在哪一步少算，并给我可打开的证据。
 
-| 区域 | 事件数 | magnitude 合计 |
-| --- | ---: | ---: |
-| North | 3 | 90 |
-| South | 1 | 40 |
-| 未归因 | 1 | 20 |
-| **合计** | **5** | **150** |
+明细仍然是 **5 条、150**，但视图只算出 **4 条、130**。事件 2 的读数是 20，现在找不到对应的设备。视图的内连接丢掉了它，覆盖检查可以把它列为未归因，保留在总量里。
 
-事件 2 的设备标识现在找不到对应设备。旧报表视图用了内连接，只算出 **4 条、130**。能解释差异的答案会把这条事件单独列出，同时保留在总量里。
-
-- 点回答下方的 **查看指标证据**，找 active 筛选、SQL 以及哪段关联少匹配了 1 条。
-- 在 **数据目录 → 关系与血缘 → 历史与失效记录** 展开旧关联，对照原验证和本次复核，看它为何失效。
+- 在 **数据目录 → 关系与血缘** 看视图引用了哪些上游表，再展开 **历史与失效记录**，对照旧的关联验证和这次复核。
+- 点回答下方的 **查看指标证据**，看实际筛选条件、SQL 和未匹配的数量。
 
 <details>
 <summary>看实际面板截图</summary>
 
 ![指标证据中有 1 条未归因事件，合计 20](../docs/images/missing-record-evidence.png)
 
-![历史关系里同时保留原验证和本次未匹配检查](../docs/images/why-memory-expired.png)
+![历史关系里保留了原验证和本次未匹配检查](../docs/images/why-memory-expired.png)
 
 </details>
-
-这类排查适用于任何按关联表分组的报表，比如订单按渠道、库存按仓库、工单按团队。关键是从报表追到它依赖的表，再按当前数据复核关联。
-
-## 3. 想试不同改法时，换用 Stello 分支
-
-把那条事件归到 North 还是 South，会改变分组结果。可以从同一份数据分别试两种写法，然后核对结果。普通 PostgreSQL 演示库用于前两步的只读排查，试验分支另接 Stello。[查看分支做法和四子代理设计](../docs/experiments.zh-CN.md)。
 
 ## 演示结束后
 
@@ -81,6 +69,6 @@ dsh plugin --profile web exec stellane-demo verify telemetry
 dsh plugin --profile web exec stellane-demo stop
 ```
 
-`verify` 把当前数据与样例预期对照。`stop` 停止容器并保留数据，`start` 可以继续。需要从头重做时用 `reset` 恢复演示表，再重新验证已保存的关系。下次运行前设置相同的 `STELLANE_DEMO_HOME`。
+`verify` 核对当前样例的预期结果。`stop` 停止容器并保留数据，`start` 可以继续。若要从头重做，用 `reset` 恢复演示表，再重新验证关系。在新终端使用同一个 `STELLANE_DEMO_HOME`。
 
-已有专用演示库时，也可用 [telemetry SQL](datasets/telemetry/README.md) 初始化数据，再用只读角色连接。[查看实测结果](../docs/release-status.zh-CN.md)。
+[样例数据和预期值](datasets/telemetry/README.md) · [0.1 演示验收记录](../docs/release-status.zh-CN.md)

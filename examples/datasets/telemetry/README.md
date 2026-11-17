@@ -1,6 +1,6 @@
-# Telemetry: which area owns this event?
+# Telemetry fixture and expected results
 
-This fully synthetic dataset demonstrates relationship discovery, cross-chat memory, a broken relationship, and two plausible repairs. Start with the [demo guide](../../README.md).
+Use these synthetic data and expected results with the [DSH relationship walkthrough](../../README.md) or the [branch verification steps](../../../DEVELOPMENT.md#真实分支对照).
 
 The dataset has six events, three devices and two zones. Five events are active. There are no declared foreign keys. Table and column comments provide the meaning of the records; the Agent still needs to inspect and verify the relationships.
 
@@ -21,11 +21,11 @@ flowchart LR
 
 `drift.sql` changes event 2's device token to `missing-device`. The pre-existing inner-join view then reports only 130 units. A complete answer keeps the missing 20 units visible and explains why the old relationship no longer covers every event.
 
-From the same drifted baseline, alternative A assumes event 2 came from `device-a`, while alternative B assumes it came from `device-c`. Both restore coverage. The differing allocation shows why a successful join does not establish business truth. Source records or a data owner must decide which proposed rule is correct.
+From the same baseline after drift, alternative A sets event 2 to `device-a`, while B sets it to `device-c`. Both restore coverage, but each attributes the 20 units to a different area. These updates make branch isolation easy to check. To choose a real repair, confirm the device in the source records.
 
 - `setup.sql` creates the schema and data, and fails if the schema already exists.
 - `drift.sql` simulates the external change. It is safe to repeat within this demo.
 - `variant-a.sql` and `variant-b.sql` each contain one proposed update for a separate branch.
 - `manifest.json` provides independent expected results, a verification query and a whole-dataset fingerprint query. The fingerprint detects changes; it is not a database snapshot guarantee.
 
-Keep the expected results and proposed updates as an acceptance checklist. Do not give the Agent an invented claim that either hypothesis has already been confirmed.
+Use the expected results to check the Agent's queries independently.

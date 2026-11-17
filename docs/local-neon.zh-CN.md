@@ -22,7 +22,7 @@ dsh plugin --profile web exec stellane-neon status
 
 在 Stellane 选择「数据源 → 添加数据源 → Neon (Docker)」，粘贴 `start` 打印的 `provider.json` 绝对路径，并在它打印的项目目录中使用普通 DSH 对话。安装包默认文件为 `~/.local/share/stellane-neon/local/provider.json`，源码方式为 `.stellane-dev/neon-local/provider.json`，引用私有的本地控制器令牌，不要把令牌贴进聊天。这个接入入口只接受 loopback 控制器地址。
 
-来源初始为空。合成演示需要维护者使用显式数据库客户端和 `dsh plugin --profile web exec stellane-neon url` 提供的私有 URL，加载样例 setup 与 drift SQL。加载是测试准备，单独执行，不经过 Agent 的只读来源连接。之后按[分支教程](experiments.zh-CN.md)里的问题和 A/B 预期结果验收。普通 PostgreSQL 分析无需这些步骤。
+来源初始为空。用数据库客户端和有建表权限的角色，从 `dsh plugin --profile web exec stellane-neon url` 输出的私有地址接入，依次导入 `examples/datasets/telemetry/setup.sql` 和 `drift.sql`。Agent 还是通过只读来源访问。[样例说明与预期结果](../examples/datasets/telemetry/README.md)。
 
 ## 可重复验证
 
@@ -34,7 +34,7 @@ STELLANE_NEON_LOCAL_CONFIG="$PWD/.stellane-dev/neon-local/provider.json" corepac
 
 测试先准备合成来源，再从共同基线派生 A/B，核对隔离写入、只读结果和来源未变，最后通过产品管理逐叶回收记录的资源。请使用专用测试来源。`pnpm test:neon` 验证的是模拟 API 响应，属于另一层检查。本地环境未就绪时测试失败，不会静默跳过；失败不能写成真实验收通过；保留测试打印的状态 / 报告路径以便恢复。
 
-要执行 A/B 数据集对照，先向专用来源加载公开的 setup 和 drift 数据，再运行 `pnpm demo:branches --neon /absolute/path/provider.json --dataset telemetry` 或 `support`。这个程序直接调用 Core；普通 DSH 对话演示需要另行验收。
+在专用来源导入事件样例后，可按[分支验收步骤](../DEVELOPMENT.md#真实分支对照)从 `~/Temp` 的独立构建运行。将 `--stello` 改为 `--neon`，并使用本地 Neon 的 `provider.json`。脚本直接调用 Core。DSH 普通对话需单独验证。
 
 ## 停止、恢复和收尾
 

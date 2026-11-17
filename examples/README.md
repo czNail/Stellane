@@ -1,8 +1,8 @@
-# Find the missing amount in a report
+# Pick up from a relationship you already verified
 
-[中文](README.zh-CN.md) · [Install Stellane](../README.md#install-and-ask-a-question) · [Branch experiments](../docs/experiments.md)
+[中文](README.zh-CN.md) · [Install Stellane](../README.md#install-and-ask-a-question) · [Branch rehearsal](../docs/experiments.md)
 
-**The source adds up to 150. Why does the report show 130?** Start with a complete report, break one device match, then trace which row disappeared. This walkthrough uses PostgreSQL and synthetic data.
+This runnable PostgreSQL fixture has event, device and area tables with no foreign keys between them. First find how an event gets its area. Then start a new chat using both the saved joins and a business definition you confirmed. Finally change one sample record and see where the old relationship stops matching.
 
 ## Connect the demo database
 
@@ -14,30 +14,31 @@ dsh plugin --profile web exec stellane-demo start
 dsh plugin --profile web exec stellane-demo url
 ```
 
-1. Open **Stellane → Data sources → Add data source**. Select **PostgreSQL** and paste the URL from the second command.
+1. In **Stellane → Data sources → Add data source**, choose **PostgreSQL** and paste the URL printed by the second command.
 2. Use the **Project** path printed by `start`. Name the connection `Stellane demo` if you like, then click **Connect and start**.
-3. Click **Ask in project chat**. For the later prompts, start a fresh chat in the same project.
+3. Click **Ask in project chat**. Use the same DSH project when you start another chat.
 
-## 1. Follow the report to its tables and check the joins
+## 1. Start with a question and verify the joins
 
-> In schema `stellane_demo_telemetry`, show which tables feed the `active_event_totals` view. Count active events by area from the detail table. Check that the joins cover all active events and save the relationships you verify.
+> In `stellane_demo_telemetry`, count active events by area. Find how each event gets its area, check whether the joins cover all active events, and save the relationships you verify.
 
-Open **Data catalog → Relationships and lineage**:
+Expect **North 4, South 1, total 5**. In **Data catalog → Relationships and lineage**, look for the two checks. An event's device token needs to match a device, and that device's zone needs to match an area. The evidence shows the scope of each check and how many rows had no match.
 
-| Look at | What it tells you |
-| --- | --- |
-| Lineage for `active_event_totals` | PostgreSQL records which tables and fields the view references. This view uses `event_log`, `device_inventory` and `zone_registry`. |
-| Verified relationships | Checks on actual rows tell you whether each event matches a device and each device matches an area. This dataset has no declared foreign keys, so the evidence comes from the data. |
+## 2. Save a confirmed business term and open a new chat
 
-Expect **North 4, South 1**, for **5 active events**. In a new chat in that project, ask:
+Go to **Data catalog → Definitions → Add definition**. Name it “Countable event”, select `stellane_demo_telemetry.event_log` as the table, and set the source to “Demo rules”. Enter this definition:
 
-> Reuse the relationships we found in `stellane_demo_telemetry`. Check that they still apply, then sum magnitude by area for active events.
+> A countable event is a row with `state = 'active'`. Each row is one event, its reading comes from `magnitude`, and each row counts once.
 
-Expect **North 110, South 40, total 150**. The chat can start with the two saved relationships, then check them against the current data.
+Save it and start another chat in the same project:
 
-## 2. Break one match and find the missing row
+> Sum the readings of countable events by area. Use the saved definition, recheck the joins we found earlier, and show the query evidence.
 
-Keep the connection and saved observations. In the same terminal, run:
+Expect **North 110, South 40, total 150**. The definition tells the agent which rows and field to use. The verified joins help it find the area. In this version, a user saves the business term and the agent can verify and save joins.
+
+## 3. Change the data and see where the saved join fails
+
+Keep the connection and saved records. In the same terminal, run:
 
 ```sh
 dsh plugin --profile web exec stellane-demo drift telemetry
@@ -45,34 +46,21 @@ dsh plugin --profile web exec stellane-demo drift telemetry
 
 In another new chat, ask:
 
-> In `stellane_demo_telemetry`, compare the `active_event_totals` report with counts and magnitude sums for all active source events. Use Stellane’s metric check to include unmatched records. Show where the numbers diverge and provide the query evidence.
+> Compare `active_event_totals` with the count and sum of readings for all countable events in the detail table. Use Stellane's metric check to show unmatched records, explain where the report drops them, and give me the evidence.
 
-| Area | Events | Magnitude |
-| --- | ---: | ---: |
-| North | 3 | 90 |
-| South | 1 | 40 |
-| Unattributed | 1 | 20 |
-| **Total** | **5** | **150** |
+The detail table still has **5 events and 150 units**. The view shows **4 and 130**. Event 2 is worth 20 and its device no longer matches. The view drops it in an inner join. The coverage check can show it as unattributed while keeping it in the total.
 
-Event 2 now points to a missing device. The existing report's inner join drops it and returns **4 events and 130**. The coverage check shows that event separately and keeps it in the total.
-
-- Open **View metric evidence** below the answer. Look for the active filter, SQL and the join that failed to match one event.
-- Open **Data catalog → Relationships and lineage → History and invalidated observations**. Expand the old relationship to compare its first check with the failed recheck.
+- Open **Data catalog → Relationships and lineage** to see which tables the view uses. Under **History and invalidated observations**, compare the first join check with the failed recheck.
+- Open **View metric evidence** below the answer to see the filter, SQL and unmatched count.
 
 <details>
 <summary>See screenshots from the demo</summary>
 
 ![Metric evidence shows one unattributed event worth 20](../docs/images/missing-record-evidence.png)
 
-![The old relationship shows its original and failed validation](../docs/images/why-memory-expired.png)
+![The old relationship shows its original and failed checks](../docs/images/why-memory-expired.png)
 
 </details>
-
-The same checks can help when orders need a channel, inventory needs a warehouse, or tickets need a team. Follow the report dependencies, then check which rows can still be matched today.
-
-## 3. Use Stello to try different changes
-
-Assigning the event to North or South changes the area totals. You can test both changes on branches from one saved starting point. The ordinary PostgreSQL demo supports read-only investigation. Use a Stello source for branch experiments. [See the walkthrough and the four-subagent design](../docs/experiments.md).
 
 ## Finish the demo
 
@@ -81,6 +69,6 @@ dsh plugin --profile web exec stellane-demo verify telemetry
 dsh plugin --profile web exec stellane-demo stop
 ```
 
-`verify` checks the current dataset against the expected values. `stop` keeps the data for the next `start`. Use `reset` to restore the demo tables, then recheck saved relationships. Use the same `STELLANE_DEMO_HOME` setting in a new terminal.
+`verify` checks the expected values for the fixture's current state. `stop` keeps the data for the next `start`. Use `reset` to restore the demo tables, then recheck saved relationships. Use the same `STELLANE_DEMO_HOME` in a new terminal.
 
-For a dedicated database of your own, load the [telemetry SQL](datasets/telemetry/README.md) and connect with a read-only role. [See the verification results](../docs/release-status.md).
+[Fixture and expected values](datasets/telemetry/README.md) · [0.1 verification results](../docs/release-status.md)

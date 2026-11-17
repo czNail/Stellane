@@ -33,13 +33,14 @@ Stello integration tests need a separate test instance and copied build artifact
 
 ## Keep the demos useful
 
-The [demo guide](examples/README.md) connects setup, ordinary chat prompts, deliberate data changes and expected outcomes. It is the first path for someone who does not have a suitable database. The [experiment walkthrough](docs/experiments.md) shows how to use one baseline for separate trial paths.
+The [PostgreSQL demo](examples/README.md) shows how to keep a verified relationship useful across chats. The [order repair example](docs/experiments.md) shows when to rehearse a change in branches. Use the [development checks](DEVELOPMENT.md#真实分支对照) for repeatable branch validation with published data.
 
 When adding a scenario:
 
 - Use synthetic data and a replaceable schema. Do not put business-specific table names or repair rules into Core or the bundled Skill.
 - Include setup SQL, the controlled change, each proposed variant and independently computed expected outputs. State which assumptions are supplied by the user and which relationships the Agent should discover.
-- Explain the question and the benefit: what a plain answer could miss, what should be reused, or which changes need independent branches.
+- For relationship examples, show what the agent learns during investigation, what evidence supports it and what a later chat can reuse.
+- For branch examples, check what a read-only query or a transaction on a test database already answers. Show which committed changes a downstream check or reviewer needs to see.
 - For A/B comparisons, verify the shared starting state, the same metric definition, source preservation and variant isolation. Cover cleanup or retained dependencies as well as the successful query.
 - Keep prompts free of answer spoilers. Expected-output files are for the person checking the demo; they should not be injected into the Agent's conversation as evidence.
 

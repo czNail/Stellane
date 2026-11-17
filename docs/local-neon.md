@@ -22,7 +22,7 @@ The package stores instances under `~/.local/share/stellane-neon/`; the default 
 
 Use **Data sources → Add data source → Neon (Docker)** in Stellane. Paste the absolute `provider.json` path printed by `start`, and use its printed project directory for ordinary DSH chat. The default package file is `~/.local/share/stellane-neon/local/provider.json`; a source checkout uses `.stellane-dev/neon-local/provider.json`. It references a private local controller token; do not paste the token into chat. Only a loopback controller endpoint is accepted by this connection path.
 
-The source starts empty. For a fixture, load the synthetic setup and drift SQL using an explicit database client and the private URL from `dsh plugin --profile web exec stellane-neon url`. Do this as fixture setup, outside the Agent's read-only source connection. The [branch walkthrough](experiments.md) then supplies questions and expected A/B results. Normal PostgreSQL analysis still works without this setup.
+The source starts empty. Use a database client and a setup role with the private URL from `dsh plugin --profile web exec stellane-neon url` to load `examples/datasets/telemetry/setup.sql` followed by `drift.sql`. The Agent uses the source read-only. [Fixture and expected results](../examples/datasets/telemetry/README.md).
 
 ## Repeatable validation
 
@@ -34,7 +34,7 @@ STELLANE_NEON_LOCAL_CONFIG="$PWD/.stellane-dev/neon-local/provider.json" corepac
 
 It seeds a synthetic source, creates A/B trials from one baseline, verifies isolated writes, read-only results and source preservation, then uses product management to remove only its recorded resources. The supplied source must be dedicated to testing. Contract tests (`pnpm test:neon`) exercise simulated responses and are a different check. This local test fails when the fixture is unavailable; a failed live test is not a passing result; keep its printed state/report path for recovery.
 
-To run the A/B dataset comparison, load the published setup and drift data into a dedicated source first, then use `pnpm demo:branches --neon /absolute/path/provider.json --dataset telemetry` or `support`. This runner calls Core directly. An ordinary DSH chat demonstration is a separate acceptance step.
+After loading the telemetry fixture into the dedicated source, run the [branch verification steps](../DEVELOPMENT.md#真实分支对照) from a built checkout under `~/Temp`. Replace `--stello` with `--neon` and use the local Neon `provider.json`. The runner calls Core directly. Verify an ordinary DSH chat separately.
 
 ## Stop, resume and recover
 

@@ -1,26 +1,20 @@
 # Stellane
 
-Stellane is a DeepSeek Harness plugin for investigating PostgreSQL data in ordinary chat. Ask which tables feed a report, find why a total is short, and open the SQL behind the answer. With Stello, test different changes on separate database branches and keep the evidence for each result.
+Stellane is a DeepSeek Harness plugin for investigating PostgreSQL in ordinary chat. Find which data represents a business object and how its tables fit together. With Stello, apply proposed changes on isolated branches and inspect the results before deciding what to do.
 
-[中文](README.zh-CN.md) · [Walk through a missing-record investigation](examples/README.md) · [Branch experiments](docs/experiments.md)
+[中文](README.zh-CN.md) · [Work through a missing relationship](examples/README.md) · [Rehearse a data repair](docs/experiments.md)
 
-## A report shows 130. The source adds up to 150.
+## Find the refund records once, then ask about refunds again
 
-The event table contains **five active events totalling 150**. The report groups them by area and returns **130**.
+A user asks, “Which channels did last month's refunds come from?” The tables are called `t_037` and `t_058`, the columns `c01` and `c12`, and there are no foreign keys. Given two known refund references, the agent can look for candidate tables, verify which columns link to orders, and check whether the join would count any refund twice.
 
-- **Follow the lineage.** The PostgreSQL report view depends on the event, device and area tables. That tells you where to look for the missing amount.
-- **Check the current data.** One event worth 20 has no matching device. The report's inner join drops it. The coverage check can show it separately and keep its value in the total.
-- **Reuse verified relationships.** A later chat can find the joins verified earlier. After a data change, you can open the original check and the failed recheck side by side.
+Once someone confirms which rows count as refunds, save the tables, fields and filters as a **business definition**. The agent can save the joins it verifies. When you ask, “Which channel had the most refunds this month?”, a later chat on the same source can pick up from both records and recheck the joins. When a report drops rows, view lineage shows where to investigate and query evidence shows what went missing. [Try the PostgreSQL walkthrough](examples/README.md).
 
-A normal PostgreSQL connection is enough for this workflow. [Try it on sample data](examples/README.md).
+## Rehearse a duplicate-order repair before adopting it
 
-## Test each proposed change on its own branch
+There are duplicate historical orders. Should you keep the newest record or the one that reconciles with a payment? A read-only query can show which rows each rule would pick. A rehearsal also needs to update order references and let the existing reports query the changed data.
 
-A support ticket needs **90 minutes** and has no team assigned. Sending it to General creates **390 minutes of work against a capacity of 300**. Sending it to Specialist gives General **300 / 300** and Specialist **290 / 480**. Two other options are to move one more ticket to Specialist to free 60 minutes for General, or add 90 minutes of temporary capacity to General. Compare capacity, transfers and staffing costs before choosing.
-
-With Stello, save the starting data once and give each option its own branch. Apply each change independently and compare the results using the same calculation. The source stays read-only through Stellane.
-
-In 0.1, one DSH chat can run several separately named experiments and open their evidence. The next workflow we want is one task with four subagents, each exploring its own branch from that baseline, with the parent comparing the results. [See the current walkthrough and the four-subagent design](docs/experiments.md).
+With Stello, save one starting point and apply each proposal on its own branch. Run the same checks for payment and refund amounts, missing references and changes to channel totals. Keep the edits and results for review. [See the branch rehearsal](docs/experiments.md).
 
 ## Install and ask a question
 
@@ -36,10 +30,10 @@ dsh plugin --profile web add stellane
 2. Choose **PostgreSQL**, paste the connection URL, select your project directory and click **Connect and start**. A regular Neon PostgreSQL URL works here too.
 3. Click **Ask in project chat**, or open an ordinary DSH chat in that project. Ask:
 
-> Which tables feed this view? Check whether it drops any records and show me the reason and query evidence.
+> Which data contains refunds? How do those records link back to orders? Show me what you checked.
 
 Use **Data catalog → Relationships and lineage** for view dependencies and verified joins. Open **Activity and results** for SQL, experiment progress and saved results.
 
-In 0.1, lineage covers upstream dependencies of PostgreSQL views. Stello is the verified path for isolated writes. Local and cloud Neon branching are experimental.
+In 0.1, the agent can read saved business definitions and retain verified keys and equality joins. Automatically saving newly discovered business terms and their mappings is a design goal. Lineage covers upstream dependencies of PostgreSQL views. Stello branching has been verified. Local and cloud Neon branching remain experimental.
 
 [Install, upgrade and remove](docs/install-and-maintain.md) · [Data and privacy](docs/data-and-privacy.md) · [Development and testing](DEVELOPMENT.md)
