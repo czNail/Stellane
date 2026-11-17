@@ -12,22 +12,17 @@
 dsh plugin --profile web add stellane
 ```
 
-也可以运行 `npm pack stellane@0.1.0` 下载安装包，再传入本机绝对路径。
+也可以先下载安装包，再用本机绝对路径安装。
 
 ```sh
-dsh plugin --profile web add /absolute/path/stellane-0.1.0.tgz
+mkdir -p "$HOME/Temp/stellane-install"
+npm pack stellane@0.1.0 --pack-destination "$HOME/Temp/stellane-install"
+dsh plugin --profile web add "$HOME/Temp/stellane-install/stellane-0.1.0.tgz"
 ```
 
 重启该配置的 Web Host，再打开 **Stellane → 数据源 → 添加数据源**。普通 PostgreSQL URL 即可用于分析、血缘和记忆。
 
-没有自己的数据时，可以用 Docker 启动合成样例：
-
-```sh
-dsh plugin --profile web exec stellane-demo start
-dsh plugin --profile web exec stellane-demo url
-```
-
-使用脚本打印的项目目录。安装包的 helper 把文件保存在 `~/.local/share/stellane-demo`，不会往 npm 包安装目录写数据；源码方式 `pnpm demo` 默认使用 `.stellane-dev/demo`。可设置绝对路径 `STELLANE_DEMO_HOME` 修改位置。容器所属标识包含状态路径，不同演示目录不会接管彼此的容器。`stop` 保留数据卷，`reset` 只恢复合成样例 schema。完整问题与预期结果见[演示指南](../examples/README.zh-CN.md)。
+需要样例库时，按[演示的开头](../examples/README.zh-CN.md#接入演示库)启动一个独立的 PostgreSQL。
 
 ## 状态存在哪里
 

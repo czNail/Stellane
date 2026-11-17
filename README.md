@@ -1,145 +1,45 @@
 # Stellane
 
-**Understand your Postgres data. Explore different paths. Keep the evidence for every result.**
+Stellane is a DeepSeek Harness plugin for investigating PostgreSQL data in ordinary chat. Ask which tables feed a report, find why a total is short, and open the SQL behind the answer. With Stello, test different changes on separate database branches and keep the evidence for each result.
 
-Stellane is a DeepSeek Harness plugin for asking questions and testing ideas in ordinary chat. It helps the Agent understand tables, remember verified relationships and revisit them when data changes. With Stello, the Agent can try alternative changes on separate database branches, compare their results and keep the source unchanged through Stellane.
+[中文](README.zh-CN.md) · [Walk through a missing-record investigation](examples/README.md) · [Branch experiments](docs/experiments.md)
 
-Multiple trial paths are central to Stellane: start from a common baseline, let each idea develop independently, then make a decision with evidence. The side panel shows sources, memory, SQL, experiment progress and retained results.
+## A report shows 130. The source adds up to 150.
 
-[中文说明](README.zh-CN.md) · [Try the demos](examples/README.md) · [Branch experiment walkthrough](docs/experiments.md) · [Product decisions](PRODUCT.md) · [Development and testing](DEVELOPMENT.md) · [Install, upgrade and remove](docs/install-and-maintain.md) · [Data and privacy](docs/data-and-privacy.md)
+The event table contains **five active events totalling 150**. The report groups them by area and returns **130**.
 
-## When it helps
+- **Follow the lineage.** The PostgreSQL report view depends on the event, device and area tables. That tells you where to look for the missing amount.
+- **Check the current data.** One event worth 20 has no matching device. The report's inner join drops it. The coverage check can show it separately and keep its value in the total.
+- **Reuse verified relationships.** A later chat can find the joins verified earlier. After a data change, you can open the original check and the failed recheck side by side.
 
-| Situation | What you do with Stellane | What you gain |
-| --- | --- | --- |
-| You inherit an unfamiliar database | Ask how tables relate; inspect definitions and view lineage | An explanation backed by the actual schema and queries |
-| Several analyses need the same joins | Find and verify relationships once, then retrieve and recheck them in later chats | Less repeated exploration, with evidence of whether old knowledge still applies |
-| A report silently drops records after data changes | Check relationship coverage and inspect failed observations | Missing records remain visible in totals and the reason is traceable |
-| A mapping could be repaired in more than one way | Try A and B on separate branches from one baseline | Comparable results without mixing the two proposed repairs |
-| You want to test an allocation rule or a schema change | Change data, tables or views in an experiment and run verification queries | A measured result before deciding whether to adopt the change elsewhere |
+A normal PostgreSQL connection is enough for this workflow. [Try it on sample data](examples/README.md).
 
-These features work with your schema. Stellane has no built-in sales, finance, telemetry or support model. The Agent chooses the queries and proposed changes; Stellane checks access, validates supported claims and retains execution evidence.
+## Test each proposed change on its own branch
 
-## One baseline, several paths
+A support ticket needs **90 minutes** and has no team assigned. Sending it to General creates **390 minutes of work against a capacity of 300**. Sending it to Specialist gives General **300 / 300** and Specialist **290 / 480**. Two other options are to move one more ticket to Specialist to free 60 minutes for General, or add 90 minutes of temporary capacity to General. Compare capacity, transfers and staffing costs before choosing.
 
-A useful experiment asks more than “did this SQL run?” It asks “what changes under this hypothesis, compared with the same starting data?”
+With Stello, save the starting data once and give each option its own branch. Apply each change independently and compare the results using the same calculation. The source stays read-only through Stellane.
 
-```mermaid
-flowchart LR
-    S[Source database] --> B[Saved baseline]
-    B --> A[Experiment A]
-    B --> C[Experiment B]
-    A --> RA[Result A and evidence]
-    C --> RB[Result B and evidence]
-    RA --> D[Compare and decide]
-    RB --> D
-```
+In 0.1, one DSH chat can run several separately named experiments and open their evidence. The next workflow we want is one task with four subagents, each exploring its own branch from that baseline, with the parent comparing the results. [See the current walkthrough and the four-subagent design](docs/experiments.md).
 
-1. **Save one baseline.** A and B use the same starting point, instead of taking separate samples of a moving source.
-2. **Give each idea its own branch.** A mapping repair, data update or schema change in A does not become part of B.
-3. **Measure both with the same definition.** Compare totals, coverage, group changes and the relevant SQL evidence. Two variants can both eliminate missing joins while assigning records differently; complete coverage alone does not establish which business rule is correct.
-4. **Keep the results and end the trials.** Temporary resources are cleaned up or reported as retained dependencies. Choosing a result does not automatically apply it to production.
+## Install and ask a question
 
-For example, ask in one ordinary chat:
+Use Node.js **24.9+**, DeepSeek Harness Web **0.2.2-rc.1 through rc.3**, and a working DSH model connection. Installation was tested on Linux.
 
-> Save a common baseline. In separate experiments, test mapping hypothesis A and mapping hypothesis B using the rules I supplied. For each, report the same metric, unmatched records and changes by group. Compare both with the baseline, retain the evidence, and leave the source unchanged.
-
-The current workflow supports separately named experiments from a shared baseline. Run the variants in the same conversation and compare their saved results there; inspect each task in the panel. Automatic multi-Agent scheduling and a combined multi-variant comparison screen are future work. The [branch walkthrough](docs/experiments.md) provides concrete data, prompts, expected results and cleanup steps.
-
-## Choose your connection
-
-| Connection | Queries, definitions, view lineage and relationship memory | Isolated write experiments |
-| --- | --- | --- |
-| PostgreSQL | Yes | Requires a branching provider |
-| Neon connection URL | Yes | The URL alone has no branching management |
-| Open-source Neon in Docker | Yes | [Experimental local controller](docs/local-neon.md); full runtime acceptance pending |
-| Neon cloud API | Yes | Experimental adapter |
-| Stello | Yes | Yes |
-
-**A Postgres connection is enough to start.** Analysis and memory do not require Docker, Stello or a Neon API key. Use branching when a question needs an isolated change to data or schema; a read-only question can stay on the source connection.
-
-Stellane uses the provider's database branching rather than implementing its own copy engine. Stello provides fixed data states. Neon provides branches that Stellane treats as read-only baselines and results; an external administrator can still change them. Neon results can depend on retained parent branches. The panel reports that retention. Local Docker timelines occupy disk; a cloud account can incur charges. The self-hosted Docker route is under validation; its complete runtime test has not passed yet. Branch startup time and resource cost depend on the provider and workload.
-
-## Install Stellane
-
-Stellane 0.1.0 requires Node.js **24.9+**, DeepSeek Harness Web **0.2.2-rc.1 through rc.3**, and a working DSH model connection. Installation was verified on Linux.
-
-In DSH, open **Plugins → Add plugin** and enter `stellane`. From the command line:
+In DSH, open **Plugins → Add plugin** and enter `stellane`, or run:
 
 ```sh
 dsh plugin --profile web add stellane
 ```
 
-Restart the Web Host for that profile and open Stellane from the sidebar. The panel supports English and Chinese. For a downloaded archive, state backups or uninstall instructions, see [installation and maintenance](docs/install-and-maintain.md).
+1. Restart the Web Host. Open **Stellane → Data sources → Add data source**.
+2. Choose **PostgreSQL**, paste the connection URL, select your project directory and click **Connect and start**. A regular Neon PostgreSQL URL works here too.
+3. Click **Ask in project chat**, or open an ordinary DSH chat in that project. Ask:
 
-## Install from source
+> Which tables feed this view? Check whether it drops any records and show me the reason and query evidence.
 
-For development, use Node.js 24.9+ and pnpm 11.1.2 through Corepack:
+Use **Data catalog → Relationships and lineage** for view dependencies and verified joins. Open **Activity and results** for SQL, experiment progress and saved results.
 
-```sh
-git clone https://github.com/czNail/Stellane.git
-cd Stellane
-corepack pnpm install
-corepack pnpm check
-dsh plugin --profile web add "$PWD"
-```
+In 0.1, lineage covers upstream dependencies of PostgreSQL views. Stello is the verified path for isolated writes. Local and cloud Neon branching are experimental.
 
-Restart the same Host after changing the built plugin. Development and release checks are in [DEVELOPMENT.md](DEVELOPMENT.md).
-
-## Try it without your own data
-
-The repository includes small synthetic datasets, example questions, deliberate data changes and independently checkable expected results. You can see a relationship discovered, reused in a new chat and invalidated after a change, then test two repair paths with a branching provider.
-
-With Docker running:
-
-```sh
-dsh plugin --profile web exec stellane-demo start
-dsh plugin --profile web exec stellane-demo status
-```
-
-Follow the printed project and private connection-file instructions, then use the [step-by-step demos](examples/README.md). The local Postgres demo covers analysis and memory. The branch walkthrough additionally needs a configured Neon or Stello test source; starting the local demo does not create a cloud project.
-
-Use `dsh plugin --profile web exec stellane-demo stop` when finished. From a source checkout, the equivalent commands are `pnpm demo start`, `status` and `stop`. Reset, data-change and provider setup instructions are in the demo guide. The helper manages its own labeled demo resources.
-
-## Connect once, then chat
-
-1. Open **Stellane → Data sources → Add data source**.
-2. Select PostgreSQL or Neon, paste the connection URL and confirm the project directory. The current Harness project is filled in when available; the name defaults to the database name. The database itself may be remote.
-3. Click **Connect and start**. Stellane tests the connection, stores credentials in a private file on the Host, and creates a read-only environment.
-4. Open a normal chat in that project and ask a question. The bundled `stellane-data` Skill guides the Agent to the connected data; no separate Stellane chat is required.
-
-Example prompts — replace the object names with your own:
-
-> What tables are available, and how are they related?
->
-> Count events by region. Check the join and show records that cannot be attributed.
->
-> In a new chat: calculate another metric using the relationship we found. Verify that it still holds.
-
-Multiple relevant sources? Name the one to use in the conversation. Business definitions are optional; add them under **Data catalog** when a term needs an agreed meaning.
-
-For local Neon experiments, follow [the Docker Neon setup](docs/local-neon.md); the installed package includes its launcher. Cloud API access is a separate experimental route. For Stello, use its exported client configuration and source branch. You can then request a single trial or multiple named trials from a shared baseline. See [experiments](docs/experiments.md) for the exact workflow and provider differences.
-
-## Where to look
-
-| Panel | Purpose |
-| --- | --- |
-| 任务与结果 · Activity and results | Recent runs, experiment progress, evidence and results. Return to the original conversation. |
-| 数据目录 · Data catalog | Tables, definitions, view lineage and saved relationship observations, including failed rechecks. |
-| 探索 · SQL exploration | Run SQL manually or open a conversation bound to a specific environment. |
-| 数据源 · Data sources | Add connections and see which capabilities each provides. |
-| 管理与清理 · Management | Disable access, update credentials, archive memory, remove retained branches or delete local data. |
-
-You can stay in chat for daily work. Open the panel when you want to inspect or manage what happened.
-
-## Current scope
-
-- Memory covers verified row keys and equality joins. View lineage comes from Postgres metadata. It does not yet model every output-column transformation or external ETL job.
-- Saved data matches are observations, not proof of business meaning. Live data and Neon branches require fresh checks before reuse; Stellane does not continuously watch external writes.
-- Structured metrics support a chain of equality joins, grouped row counts, optional numeric sums and one equality filter. Other calculations use ordinary read-only SQL with their own execution evidence.
-- Source connections are read-only through Stellane. Writes are restricted to plugin-created experiment branches. Use a database role with the access you want to grant.
-- State and evidence live on one Harness Host. Distributed hosting, general multi-Agent experiment scheduling and automatic production adoption are outside the current scope.
-
-PostgreSQL and Stello are the 0.1 release paths. Local and cloud Neon branching are experimental and outside the 0.1 acceptance scope; API contract checks are not a cloud acceptance result. The self-hosted Docker setup uses open-source Neon services and a Stellane development controller, independently of a paid cloud account. See [the test guide](DEVELOPMENT.md#检查与验收) for requirements and coverage. Demo outputs illustrate behavior on synthetic data, not a promise of production accuracy or speed.
-
-See [release verification](docs/release-status.md) for tested workflows.
+[Install, upgrade and remove](docs/install-and-maintain.md) · [Data and privacy](docs/data-and-privacy.md) · [Development and testing](DEVELOPMENT.md)

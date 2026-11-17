@@ -12,22 +12,17 @@ In **Plugins → Add plugin**, enter `stellane`. The equivalent CLI command is:
 dsh plugin --profile web add stellane
 ```
 
-To download an installable archive, run `npm pack stellane@0.1.0` and pass its absolute path.
+To install from an archive, download it from npm and pass its absolute path.
 
 ```sh
-dsh plugin --profile web add /absolute/path/stellane-0.1.0.tgz
+mkdir -p "$HOME/Temp/stellane-install"
+npm pack stellane@0.1.0 --pack-destination "$HOME/Temp/stellane-install"
+dsh plugin --profile web add "$HOME/Temp/stellane-install/stellane-0.1.0.tgz"
 ```
 
 Restart the Web Host for that profile, then open **Stellane → Data sources → Add data source**. A PostgreSQL URL is enough for analysis, lineage and memory.
 
-For a synthetic playground with Docker:
-
-```sh
-dsh plugin --profile web exec stellane-demo start
-dsh plugin --profile web exec stellane-demo url
-```
-
-Use the project directory printed by the helper. The installed helper keeps its files under `~/.local/share/stellane-demo`; it does not write into the installed npm package. The source-checkout command `pnpm demo` instead uses `.stellane-dev/demo`. Set `STELLANE_DEMO_HOME` to an absolute path to choose another location. Container ownership includes that state path, so separate demo directories do not adopt one another's containers. `stop` retains the database volume; `reset` restores only the synthetic schemas. See [the demos](../examples/README.md).
+For a disposable PostgreSQL example, follow the [demo walkthrough](../examples/README.md#connect-the-demo-database).
 
 ## Where state lives
 

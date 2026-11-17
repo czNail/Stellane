@@ -233,12 +233,12 @@ corepack pnpm dev:db stop
 
 ### 真实分支对照
 
-先按多路径指南将合成数据装入专用来源并变更到 drift 状态，再运行构建后的脚本：
+先按[分支试验指南](docs/experiments.zh-CN.md#准备演示库)将合成数据装入专用测试来源，再应用同一数据集的 `drift.sql`。导入的文件和下面的 `--dataset` 要选同一个数据集。在 `~/Temp` 的测试检出里构建后执行：
 
 ```sh
-corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset telemetry
-# 或：
-corepack pnpm demo:branches --neon /absolute/path/neon-source.json --dataset support
+mkdir -p "$HOME/Temp/stellane-branches"
+run_dir="$HOME/Temp/stellane-branches/support-$(date +%Y%m%d-%H%M%S)"
+corepack pnpm demo:branches --stello /absolute/path/provider.json --dataset support --state-dir "$run_dir"
 ```
 
 验收时只保存一次共享基线，再从这个确切环境创建独立 A/B 分支。检查两项任务引用同一基线、A 的写入不改变 B、两份结果使用同一指标口径，并对照来源数据指纹确认来源未变。工单场景还比较容量约束，不能只因为关联覆盖完整就认定方案更好。脚本直接调用 Core 并使用已知方案 SQL，不能作为 Agent 自主发现或模型对话通过的证明；面板交互需另按普通对话步骤验收。
@@ -250,7 +250,15 @@ corepack pnpm demo:branches status --state-dir /absolute/path/printed-run-direct
 corepack pnpm demo:branches cleanup --state-dir /absolute/path/printed-run-directory
 ```
 
-清理按记录的真实身份处理分支，保留来源与本地证据。Neon 需要保留结果的父链；Docker 占本机磁盘，云端资源可能计费；失败或未知操作先按指南核对，不能另起一轮代替恢复。比较和选择方案不会自动合并到生产库。真实 Neon 云端结果必须单独记录，缺少凭据时保持未验证状态。
+出现失败或结果未知时，用原目录核对分支身份和写入回执：
+
+```sh
+corepack pnpm demo:branches reconcile --state-dir /absolute/path/printed-run-directory
+```
+
+`reconcile` 只核对原操作。`reviewed` 表示已核对，可以回收，并不表示原实验通过。仍有未知结果时，检查提供方和原回执。清理中断后，再用同一目录执行 `cleanup`，沿用原删除记录。若崩溃留下 `runner.lock`，确认其中的进程已经退出后才可删除它。Core 的 `owner.sqlite` 保留。
+
+脚本按身份从子到父回收本次资源，保留来源库和本地证据。试验 Neon 时需要另行接入实验性分支提供方，参见[本地 Neon 指南](docs/local-neon.zh-CN.md)。
 
 ## 检查与验收
 
