@@ -32,8 +32,8 @@ dsh plugin --profile web add stellane
 
 > Which data contains refunds? How do those records link back to orders? Show me what you checked.
 
-In a build from this repository, open query evidence and branch experiments below the answer. Use **Data catalog → Relationships and lineage** to review saved joins and failed checks. Use **Branch experiments** to compare plans from the same baseline. [Build from source](DEVELOPMENT.md#构建与安装).
+Ask the agent to remember a business term, then check and save the definition below the answer. Open query evidence or branch experiments from the same chat. Use **Data catalog → Relationships and lineage** to review saved joins and failed checks. Use **Branch experiments** to compare plans from the same baseline.
 
-In the source build, ask the agent to remember a business definition, then confirm it below the answer. With npm `0.1.0`, add definitions in the catalog and find experiments and SQL in **Activity and results**. Both cover PostgreSQL view lineage and verified table relationships. Stello branching has been verified. Local and cloud Neon branching remain experimental.
+Lineage covers PostgreSQL view dependencies. Use Stello for branch experiments. Local and cloud Neon branching remain experimental.
 
 [Install, upgrade and remove](docs/install-and-maintain.md) · [Data and privacy](docs/data-and-privacy.md) · [Development and testing](DEVELOPMENT.md)

@@ -30,7 +30,7 @@ In the same chat, ask:
 
 > Remember “Countable event”. It is a row in `stellane_demo_telemetry.event_log` with `state = 'active'`. Each row is one event and its reading comes from `magnitude`.
 
-In the source build, check the definition and table below the answer, then click **Save definition**. With npm `0.1.0`, enter the same definition and select the table in **Data catalog → Definitions → Add definition**. Start another chat in the same project:
+Check the definition and table below the answer, then click **Save definition**. Start another chat in the same project:
 
 > Sum the readings of countable events by area. Use the saved definition, recheck the joins we found earlier, and show the query evidence.
 

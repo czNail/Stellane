@@ -16,8 +16,8 @@ dsh plugin --profile web add stellane
 
 ```sh
 mkdir -p "$HOME/Temp/stellane-install"
-npm pack stellane@0.1.0 --pack-destination "$HOME/Temp/stellane-install"
-dsh plugin --profile web add "$HOME/Temp/stellane-install/stellane-0.1.0.tgz"
+npm pack stellane@0.2.0 --pack-destination "$HOME/Temp/stellane-install"
+dsh plugin --profile web add "$HOME/Temp/stellane-install/stellane-0.2.0.tgz"
 ```
 
 重启该配置的 Web Host，再打开 **Stellane → 数据源 → 添加数据源**。普通 PostgreSQL URL 即可用于分析、血缘和记忆。
@@ -50,9 +50,9 @@ dsh plugin --profile web add "$HOME/Temp/stellane-install/stellane-0.1.0.tgz"
 
 ## 升级与恢复
 
-1. 停止旧 Host。早期开发版没有排他占用和新格式拒绝机制，不能与 0.1 同时写同一目录。
+1. 停止旧 Host。每个 Host 必须独占其状态目录。
 2. 私下备份完整状态目录，包含插件创建的凭据文件；演示数据库和本地控制器的数据另行备份。
-3. 在同一 profile 安装新包并重启。格式升级前会在 `backups/` 写入并检查 SQLite 一致快照，包含尚在 WAL 中的已提交数据。迁移失败保留原格式与数据。
+3. 用 `dsh plugin --profile web add stellane@0.2.0` 在同一 profile 升级，然后重启 Host。升级状态格式前会在 `backups/` 保存核对过的 SQLite 快照，包含 WAL 中的已提交数据。迁移失败会保留原格式和数据。
 4. 在「管理与清理」检查数据源、近期证据和保留分支，再开始新任务。
 
 不要用旧版本直接打开已迁移目录。有格式守卫的版本会拒绝，早期开发版未必会拒绝。需要恢复时，停止 Host，保留出问题的目录，把一致备份恢复到另一个私有目录并带上匹配的凭据文件，让兼容版本使用该目录。远端资源身份保持原样；结果未知的操作先核对，再考虑创建新资源。SQLite 备份本身不包含外部凭据、DSH 聊天和提供方存储。

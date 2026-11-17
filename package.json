@@ -1,6 +1,6 @@
 {
   "name": "stellane",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Database context, verified memory and isolated experiments for DeepSeek Harness",
   "type": "module",
   "license": "MIT",

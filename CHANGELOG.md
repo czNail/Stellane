@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Ask the agent to remember a business term. Review the matched tables, fields and conditions below the answer, then save the definition for future chats.
+- Open query evidence directly from chat. Inspect results and relationship coverage, expand SQL when needed, then return to the same chat.
+- See progress and results for plans from the same branch baseline together. Switch between proposals and inspect each result's evidence.
+- Run one PostgreSQL sample from discovery through relationship reuse and invalidation. Use the same sample to verify branch isolation.
+
+PostgreSQL and regular Neon PostgreSQL URLs support analysis, lineage and memory. Stello supports isolated write experiments. Local and cloud Neon branching remain experimental.
+
 ## 0.1.0
 
 - PostgreSQL analysis and verified relationship memory; Stello experiments from a shared baseline with independently saved evidence.

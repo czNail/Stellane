@@ -16,8 +16,8 @@ To install from an archive, download it from npm and pass its absolute path.
 
 ```sh
 mkdir -p "$HOME/Temp/stellane-install"
-npm pack stellane@0.1.0 --pack-destination "$HOME/Temp/stellane-install"
-dsh plugin --profile web add "$HOME/Temp/stellane-install/stellane-0.1.0.tgz"
+npm pack stellane@0.2.0 --pack-destination "$HOME/Temp/stellane-install"
+dsh plugin --profile web add "$HOME/Temp/stellane-install/stellane-0.2.0.tgz"
 ```
 
 Restart the Web Host for that profile, then open **Stellane → Data sources → Add data source**. A PostgreSQL URL is enough for analysis, lineage and memory.
@@ -50,9 +50,9 @@ Replace the example with a private absolute path writable by the Host user, usin
 
 ## Upgrade and recover
 
-1. Stop the old Host. Early development versions did not enforce ownership or reject newer formats, so they must not share the 0.1 state directory.
+1. Stop the old Host. Each Host needs exclusive access to its state directory.
 2. Keep a private copy of the complete state directory, including managed credential files. Back up demo/controller data separately if you use it.
-3. Install the new archive in the same profile and restart the Host. Before a format upgrade, Stellane writes a checked SQLite snapshot under `backups/`; it includes committed data still in the WAL. A failed migration preserves the prior format and data.
+3. Run `dsh plugin --profile web add stellane@0.2.0` in the same profile and restart the Host. Before a format upgrade, Stellane writes a checked SQLite snapshot under `backups/` with committed data still in the WAL. A failed migration preserves the prior format and data.
 4. Check sources, recent evidence and retained branches in **Management** before starting new work.
 
 Do not downgrade against a migrated directory. Guarded versions refuse newer formats; early development builds may not. To recover, stop the Host, preserve the failed directory and restore a consistent backup to a separate private directory with matching credential files. Point a compatible plugin at that directory. Keep the original remote resource identities and reconcile unknown operations before creating replacements. A SQLite backup alone does not include external credential files, DSH chats or provider storage.

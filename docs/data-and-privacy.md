@@ -9,7 +9,7 @@ Stellane runs inside your DSH Host. It has no separate Stellane model endpoint o
 | Information | Where it can go | Why |
 | --- | --- | --- |
 | Table/column names, types, comments, constraints and view dependencies | Host evidence; DSH tool results and model context | Discover and explain the data |
-| Business definitions and relationship observations | Host state; selected content in DSH/model context | Reuse agreed meaning and previously checked relationships |
+| Business definitions and relationship observations | Host state; selected content in DSH/model context. Draft definitions appear in chat and are saved to the catalog when confirmed. | Reuse agreed meaning and previously checked relationships |
 | Questions, SQL, parameters and bounded row previews | Host execution evidence; DSH chat/model context | Execute, explain and later inspect the result |
 | Experiment names, branch identities, assumptions, outcomes and errors | Host evidence; DSH/model context where returned by a tool | Track isolated trials and explain failures |
 | Database passwords, API tokens and Stello credentials | Private Host files or user-provided environment/file references; the relevant database/provider | Authenticate; credentials are not intentionally included in Agent tool results or model prompts |
@@ -31,7 +31,7 @@ Local deletion is logical deletion, **not guaranteed physical erasure**. SQLite 
 
 Credentials supplied by the user through `env:` or external `file:` references are never deleted automatically. Only files recorded as created by Stellane, still in its private credentials directory, and no longer referenced elsewhere are eligible for removal. Updating a password does not revoke the old password at the database; perform server-side rotation using your database's normal controls.
 
-## Scope of 0.1
+## Scope
 
 The owner panel controls one Host's state. Project/session checks restrict Agent access within that Host; this is not an organization-wide identity system or an audit service immune to a Host administrator. State is not encrypted by Stellane; use your operating system's disk and account protections where needed.
 
