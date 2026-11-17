@@ -500,6 +500,7 @@ export const english: Record<string, string> = {
   "指定的密码环境变量尚未配置。": "The referenced password environment variable is not configured.",
   "记录不存在。": "The record does not exist.",
   "仅 Host 所有者可访问 Stellane 管理界面。": "Only the Host owner can access Stellane management.",
+  "Neon Docker（实验性）": "Neon Docker (experimental)",
   "Neon 云端（实验性）": "Neon cloud (experimental)",
   "Neon 本地配置文件": "Local Neon configuration file",
   "运行 dsh plugin --profile web exec stellane-neon start 后粘贴输出的 provider.json 路径。连接本机 Docker 中的 Neon，可以直接进行独立分支试验，不需要云端项目或云 API key。": "Run dsh plugin --profile web exec stellane-neon start, then paste the printed provider.json path. Connect to Neon in local Docker to run independent branch experiments without a cloud project or cloud API key.",

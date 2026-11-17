@@ -40,7 +40,7 @@ jobs:
       - run: pnpm test:package
       - uses: actions/upload-artifact@v4
         with:
-          name: stellane-preview-package
+          name: stellane-package
           path: |
             .stellane-dev/release/*.tgz
             .stellane-dev/release/package-check.json

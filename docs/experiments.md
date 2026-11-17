@@ -59,7 +59,7 @@ B fits these stated budgets. That is not proof that a specialist is eligible for
 
 ## Run the comparison in ordinary chat
 
-First load the chosen dataset's `setup.sql` and `drift.sql` into a **dedicated synthetic Neon or Stello source**, and connect it in Stellane with branching enabled. The SQL files deliberately use fixed demo schemas and fail if setup already exists. The [demo guide](../examples/README.md) explains the initial data and the plain PostgreSQL path.
+First load the chosen dataset's `setup.sql` and `drift.sql` into a **dedicated synthetic Stello source**, then connect it in Stellane. Stello is the supported 0.1 branch route; the Neon route below is experimental. The SQL files deliberately use fixed demo schemas and fail if setup already exists. The [demo guide](../examples/README.md) explains the initial data and the plain PostgreSQL path.
 
 Use one ordinary DSH project conversation. For the telemetry example:
 

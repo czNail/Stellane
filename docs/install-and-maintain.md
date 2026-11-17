@@ -2,20 +2,20 @@
 
 [中文](install-and-maintain.zh-CN.md) · [Quick start](../README.md) · [Data and privacy](data-and-privacy.md)
 
-## Install the preview
+## Install Stellane
 
-Use Node.js **24.9+**, a DSH **0.2.2-rc.1–rc.3** Web profile and a working model connection in DSH. This is **0.3.0-preview.1**. Linux is the current real-runtime validation environment; do not assume other platforms have passed the same tests.
+Use Node.js **24.9+**, a DSH **0.2.2-rc.1–rc.3** Web profile and a working model connection in DSH. The current release candidate is **0.1.0**. Linux is the current real-runtime validation environment; do not assume other platforms have passed the same tests.
 
-Install the preview from npm:
+Install the earlier preview from npm:
 
 ```sh
 dsh plugin --profile web add @stellane/harness-plugin@0.3.0-preview.1
 ```
 
-The [GitHub preview release](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1) also has an archive with the same built Host and client code, Skill and demo data. To install the archive, use its absolute path:
+For 0.1.0 validation, run `corepack pnpm test:package` in the checkout, then install the generated archive by absolute path. It includes the built Host, client, Skill and demo data.
 
 ```sh
-dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
+dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
 ```
 
 Restart the Web Host using that profile, then open **Stellane → Data sources → Add data source**. A normal PostgreSQL URL is enough for analysis, lineage and memory. Check that ordinary DSH chat can reach its model before diagnosing a database connection. Stellane uses that same model configuration.

@@ -1,6 +1,6 @@
 {
   "name": "@stellane/harness-plugin",
-  "version": "0.3.0-preview.1",
+  "version": "0.1.0",
   "description": "Database context, verified memory and isolated experiments for DeepSeek Harness",
   "type": "module",
   "license": "MIT",

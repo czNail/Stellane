@@ -59,7 +59,7 @@ B 满足这组明确约束，但还不能证明 Specialist 有处理资格、SLA
 
 ## 在普通对话里操作
 
-先在**专用合成数据 Neon 或 Stello 来源**导入所选数据集的 `setup.sql` 和 `drift.sql`，并在 Stellane 启用对应分支连接。SQL 使用专用演示 schema，重复 setup 会失败。[演示指南](../examples/README.zh-CN.md)介绍初始数据与普通 PostgreSQL 上手路径。
+先在**专用 Stello 测试来源**导入所选数据集的 `setup.sql` 和 `drift.sql`，并在 Stellane 接入。0.1 验收 Stello 分支，后文的 Neon 路径仍是实验性的。SQL 使用专用演示 schema，重复 setup 会失败。[演示指南](../examples/README.zh-CN.md)介绍初始数据与普通 PostgreSQL 上手路径。
 
 在同一个普通 DSH 项目对话里，以事件数据为例先说：
 

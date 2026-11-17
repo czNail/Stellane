@@ -4,7 +4,7 @@ These demos answer three practical questions: can the Agent understand an unfami
 
 Everything here is synthetic. The datasets are ordinary PostgreSQL tables, comments and views. No example table name is built into Stellane's product logic.
 
-[中文演示指南](README.zh-CN.md) · [Installation](../README.md#install-the-preview) · [Multiple experiment paths](../docs/experiments.md)
+[中文演示指南](README.zh-CN.md) · [Installation](../README.md#install-stellane) · [Multiple experiment paths](../docs/experiments.md)
 
 ## Pick a starting point
 
@@ -12,8 +12,8 @@ Everything here is synthetic. The datasets are ordinary PostgreSQL tables, comme
 | --- | --- | --- |
 | 1. Discover and remember | Find implicit joins, save verified observations, reuse them in a new chat | PostgreSQL or Neon URL |
 | 2. Catch a broken relationship | Recheck live data, retain unmatched rows, trace why old memory stopped applying | PostgreSQL or Neon URL |
-| 3. Compare two repairs | Try two mappings from one baseline; understand why full coverage alone cannot choose the correct one | Neon branching or Stello |
-| 4. Compare workload policies | Simulate two routing decisions and compare each against an explicit capacity budget | Neon branching or Stello |
+| 3. Compare two repairs | Try two mappings from one baseline; understand why full coverage alone cannot choose the correct one | Stello |
+| 4. Compare workload policies | Simulate two routing decisions and compare each against an explicit capacity budget | Stello |
 
 Start with demos 1 and 2. Demos 3 and 4 show why Stellane has multiple experiment paths. [The branch guide](../docs/experiments.md) covers their setup, prompts, expected results and cleanup.
 
@@ -122,7 +122,7 @@ The unmatched event has magnitude 20. Suppose the user wants to investigate two 
 
 Both restore complete coverage and preserve five events / 150 units. They produce different regional totals. Passing the join check does not establish which hypothesis is true.
 
-Run these on Neon branching or Stello using the [multiple-path guide](../docs/experiments.md). Save the starting point once, use it for both experiments, retain both results, and inspect the difference before applying a real-world decision. The local PostgreSQL playground demonstrates discovery and memory; it does not acquire branching capability by installing the plugin.
+Run these on Stello using the [multiple-path guide](../docs/experiments.md). Save the starting point once, use it for both experiments, retain both results, and inspect the difference before applying a real-world decision. The local PostgreSQL playground demonstrates discovery and memory; it does not acquire branching capability by installing the plugin.
 
 ## 4. Apply the same method to another business problem
 

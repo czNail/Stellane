@@ -13,9 +13,10 @@ const branchSchema = z.object({
   mode: z.enum(['writable', 'fixed', 'following']), fork_lsn: z.string().regex(/^[0-9A-F]+\/[0-9A-F]+$/i),
   complete: z.boolean(), state: z.string(), creation_id: z.string().nullable().optional(),
   parent_identity: identitySchema.nullable().optional(),
+  revision: z.number().int().nonnegative().optional(), operation: z.string().optional(), next_action: z.string().optional(),
 });
 const removalStatus = z.object({ identity: identitySchema, resource_id: z.string(), revision: z.number().int().nonnegative(),
-  state: z.string(), complete: z.boolean(), operation_id: z.string().nullish() });
+  state: z.string(), complete: z.boolean(), operation_id: z.string().nullish(), next_action: z.string().optional() });
 const configSchema = z.object({ endpoint: z.url().refine(value => {
   const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password;
 }), ca: z.string().min(1), token_file: z.string().min(1) });
@@ -45,6 +46,12 @@ function isBusy(error: unknown): boolean {
 }
 function canObserveAfter(error: unknown): boolean {
   return isBusy(error) || error instanceof StelloRequestError && error.status === 504 && error.code === 'result_unknown';
+}
+function notFound(error: unknown): boolean {
+  return error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found';
+}
+function canObserveRetry(error: unknown): boolean {
+  return canObserveAfter(error) || error instanceof StelloRequestError && error.status === 409 && error.code === 'stale_revision';
 }
 
 export class StelloProvider {
@@ -145,34 +152,48 @@ export class StelloProvider {
     const body = operation.request;
     if (!body) throw new Error('原派生请求尚未取得准入。');
     try {
-      const binding = await this.reconcile(source, operation, signal);
-      if (binding) return binding;
+      await this.creationStatus(source, operation, signal);
     } catch (error) {
-      if (!(error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found') && !isBusy(error)) throw error;
+      // Only explicit recovery of a missing branch may submit the saved creation
+      // ticket again. An admitted resource is advanced by its current revision.
+      if (notFound(error)) return this.submitCreation(source, operation, body, signal);
+      if (!canObserveAfter(error)) throw error;
     }
-    // Resume the persisted ticket and its original identity on explicit task recovery.
-    return this.submitCreation(source, operation, body, signal);
+    return this.awaitCreation(source, operation, signal);
   }
   private async submitCreation(source: StelloSource, operation: BranchOperation, body: Record<string, unknown>, signal: AbortSignal): Promise<BranchBinding> {
     try { await this.operation(source, body, signal); }
     catch (error) {
-      // Busy or result_unknown can follow durable admission. Observe this exact ticket;
-      // never send a second create request or choose a replacement resource.
+      // Busy or result_unknown can follow durable admission. Observe this ticket
+      // before considering a revision-fenced retry of the admitted lifecycle.
       if (!canObserveAfter(error)) throw error;
     }
+    return this.awaitCreation(source, operation, signal);
+  }
+  private async awaitCreation(source: StelloSource, operation: BranchOperation, signal: AbortSignal): Promise<BranchBinding> {
     const deadline = Date.now() + 120000;
-    while (true) {
-      let binding: BranchBinding | undefined;
-      try { binding = await this.reconcile(source, operation, signal); }
-      catch (error) {
-        if (!canObserveAfter(error) && !(error instanceof StelloRequestError && error.status === 404 && error.code === 'not_found')) throw error;
+    let retryAt = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      let status: z.infer<typeof branchSchema> | undefined;
+      try { status = await this.creationStatus(source, operation, signal); }
+      catch (error) { if (!canObserveAfter(error) && !notFound(error)) throw error; }
+      if (status) {
+        const binding = this.readyCreation(source, operation, status);
+        if (binding) return binding;
+        if (!status.complete && status.operation === 'create' && status.next_action === 'retry'
+          && status.revision !== undefined && Date.now() >= retryAt) {
+          try {
+            await this.operation(source, { action: 'branch_retry', name: encodeResource(operation.resource),
+              identity: status.identity, expected_revision: status.revision }, signal);
+          } catch (error) { if (!canObserveRetry(error)) throw error; }
+          retryAt = Date.now() + 1500;
+        }
       }
-      if (binding) return binding;
-      if (Date.now() > deadline) throw new Error('Stello 派生仍未完成，请保留原操作并核对状态。');
       await setTimeout(400, undefined, { signal });
     }
+    throw new Error('Stello 派生仍未完成，请保留原操作并核对状态。');
   }
-  async reconcile(source: StelloSource, operation: BranchOperation, signal: AbortSignal): Promise<BranchBinding | undefined> {
+  private async creationStatus(source: StelloSource, operation: BranchOperation, signal: AbortSignal) {
     const request = operation.request;
     if (!request) throw new Error('派生尚未取得持久准入，无法确认远端资源。');
     const resource = operation.resource;
@@ -184,9 +205,15 @@ export class StelloProvider {
       || observed.mode !== (operation.kind === 'checkpoint' ? 'fixed' : 'writable')) {
       throw new Error('远端资源与原派生票据不匹配，已停止绑定。');
     }
+    return observed;
+  }
+  private readyCreation(source: StelloSource, operation: BranchOperation, observed: z.infer<typeof branchSchema>): BranchBinding | undefined {
     if (!observed.complete || !['ready', 'stored', 'sleeping'].includes(observed.state)) return undefined;
     if (observed.fork_lsn === '0/0') throw new Error('Stello 未返回固定来源位置。');
-    return this.binding(source, resource, observed, true);
+    return this.binding(source, operation.resource, observed, true);
+  }
+  async reconcile(source: StelloSource, operation: BranchOperation, signal: AbortSignal): Promise<BranchBinding | undefined> {
+    return this.readyCreation(source, operation, await this.creationStatus(source, operation, signal));
   }
   async remove(source: StelloSource, binding: BranchBinding, id: string, saved: BranchRemoval | undefined,
     persist: (removal: BranchRemoval) => void, signal: AbortSignal): Promise<void> {
@@ -215,16 +242,25 @@ export class StelloProvider {
     const { id: _id, ...request } = removal;
     const observeDeletion = async (status: Awaited<ReturnType<typeof inspect>>, failure?: unknown) => {
       const deadline = Date.now() + 60000;
+      let retryAt = Date.now() + 1500;
       while (status && !(status.state === 'deleted' && status.complete)) {
         // A rejected/late response can follow admission of the original delete.
         // Observe only that operation; never resubmit or adopt a different one.
         if (status.operation_id !== removal.operation_id || status.complete || Date.now() >= deadline) {
           throw failure ?? new Error('清理尚未完成，请继续核对原操作。');
         }
+        if (status.state === 'deleting' && status.next_action === 'retry' && Date.now() >= retryAt) {
+          try {
+            await this.operation(source, { action: 'branch_retry', name, identity: status.identity,
+              expected_revision: status.revision }, signal);
+          } catch (error) { if (!canObserveRetry(error)) throw error; }
+          retryAt = Date.now() + 1500;
+        }
         await setTimeout(500, undefined, { signal });
         status = await inspect();
       }
     };
+    if (!before.complete && before.operation_id === removal.operation_id) return observeDeletion(before);
     try { await this.operation(source, { action: 'branch_change', operation: 'delete', ...request }, signal); }
     catch (error) {
       const observed = await inspect().catch(() => { throw error; });

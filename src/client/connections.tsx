@@ -74,7 +74,7 @@ function SourceForm({ api, projectAccess, onSaved, onClose }: {
         <label className="st-field"><span>{t("数据库")}</span><select value={kind} onChange={event => {
           setKind(event.target.value as typeof kind);
           setError('');
-        }}><option value="postgres">PostgreSQL</option><option value="neon-local">Neon (Docker)</option><option value="neon">{t("Neon 云端（实验性）")}</option><option value="stello">Stello</option></select></label>
+        }}><option value="postgres">PostgreSQL</option><option value="stello">Stello</option><option value="neon-local">{t("Neon Docker（实验性）")}</option><option value="neon">{t("Neon 云端（实验性）")}</option></select></label>
         <label className="st-field"><span>{t("名称（可选）")}</span><input maxLength={80} value={name}
           placeholder={t("默认使用数据库名")} onChange={event => setName(event.target.value)} /></label>
         <div className="st-field"><label htmlFor="stellane-project-path">{t("用于哪个项目")}</label>

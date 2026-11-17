@@ -2,20 +2,20 @@
 
 [English](install-and-maintain.md) · [入门](../README.zh-CN.md) · [数据与隐私](data-and-privacy.zh-CN.md)
 
-## 安装预览版
+## 安装 Stellane
 
-需要 Node.js **24.9+**、DSH **0.2.2-rc.1–rc.3** Web，以及已能正常聊天的模型配置。当前版本为 **0.3.0-preview.1**。Linux 是当前真实运行验收环境，其他系统仍需单独验证。
+需要 Node.js **24.9+**、DSH **0.2.2-rc.1–rc.3** Web，以及已能正常聊天的模型配置。当前发布候选版本为 **0.1.0**。Linux 是当前真实运行验收环境，其他系统仍需单独验证。
 
-从 npm 安装预览版。
+从 npm 安装之前已发布的临时版。
 
 ```sh
 dsh plugin --profile web add @stellane/harness-plugin@0.3.0-preview.1
 ```
 
-[GitHub 预览发布页](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1)也提供相同的安装包，其中包含构建好的 Host、界面、Skill 与演示数据。下载后可用本机的绝对路径安装。
+验收 0.1.0 时，在源码目录运行 `corepack pnpm test:package`，再用生成包的绝对路径安装。包内包含构建好的 Host、界面、Skill 与演示数据。
 
 ```sh
-dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
+dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
 ```
 
 重启同一 profile 的 Web Host，打开 **Stellane → 数据源 → 添加数据源**。普通 PostgreSQL 连接 URL 就能使用分析、血缘与记忆。先确认 DSH 普通对话能连接模型，再排查数据库接入；Stellane 沿用同一模型配置。

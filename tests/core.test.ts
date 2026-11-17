@@ -165,6 +165,41 @@ test('an admitted Stello delete is observed through a late rejection without rep
   assert.equal(actions.filter(action => action === 'branch_get').length, 3);
 });
 
+test('Stello resumes a stalled create using the admitted revision, and refuses a replacement identity', async () => {
+  const id = randomUUID(); const providerId = randomUUID();
+  const parent = { service: 'test-service', slot: 0, incarnation: 1 };
+  const child = { ...parent, slot: 1 };
+  const createdAt = new Date().toISOString();
+  const source = { id: providerId, name: 'test', projectPath: '/test', configPath: '/unused', resource: 'test/main', createdAt };
+  const op: BranchOperation = { id, providerId, kind: 'fork', resource: 'test/work', parentEnvironmentId: randomUUID(), actor: owner,
+    status: 'unknown', createdAt, request: { identity: child, parent_identity: parent },
+    environment: { id: randomUUID(), name: 'work', projectPath: '/test', mode: 'branch', access: 'read-write', createdAt } };
+  const actions: string[] = []; let complete = false; let replaced = false;
+  class StalledProvider extends StelloProvider {
+    override async operation(_source: StelloSource, body: Record<string, unknown>): Promise<unknown> {
+      actions.push(String(body.action));
+      if (body.action === 'branch_retry') {
+        assert.deepEqual(body, { action: 'branch_retry', name: encodeResource(op.resource), identity: child, expected_revision: 3 });
+        complete = true; return {};
+      }
+      assert.equal(body.action, 'branch_get');
+      return { name: body.name, identity: replaced ? { ...child, incarnation: 2 } : child, parent_identity: parent,
+        resource_id: 'work', mode: 'writable', fork_lsn: '0/A', creation_id: id.replaceAll('-', ''), revision: 3,
+        operation: 'create', next_action: complete ? 'connect' : 'retry', state: complete ? 'ready' : 'preparing', complete };
+    }
+  }
+  const provider = new StalledProvider(); const signal = AbortSignal.timeout(6000);
+  assert.equal(await provider.reconcile(source, op, signal), undefined);
+  assert.deepEqual(actions, ['branch_get'], 'an observation must not advance the lifecycle');
+  replaced = true;
+  await assert.rejects(provider.resumeCreation(source, op, signal), /不匹配/);
+  assert.deepEqual(actions, ['branch_get', 'branch_get']);
+  replaced = false;
+  assert.deepEqual((await provider.resumeCreation(source, op, signal)).identity, child);
+  assert.equal(actions.filter(action => action === 'branch_retry').length, 1);
+  assert(!actions.includes('branch_create'));
+});
+
 test('experiment recovers its original resources, scopes its conversation and preserves fixed evidence after cleanup', async () => {
   const project = await mkdtemp(join(tmpdir(), 'stellane-experiment-'));
   const root = { service: 'test-service', slot: 0, incarnation: 1 };

@@ -23,7 +23,7 @@ export const dataSkill = {
     '最终回答默认不罗列 UUID、contextId、runId、关系 ID、快照编号、工具名、needs-check、relationChecksValid 等实现字段，也不把完整 SQL 贴到正文。用户明确要求排障、SQL 或技术细节时，再按实际记录展开。',
     '',
     '### 验证实验',
-    '用户明确要求模拟写入、比较改动或验证假设，且目标和改动范围清楚时，直接在普通项目对话执行。纯数据查询走只读流程。来源或改动范围有歧义时，只询问缺失信息。检查环境返回的 capabilities.canExperiment。普通 PostgreSQL 与仅用 URL 接入的 Neon 均支持查询、血缘和记忆；需要独立写入时，用户可在「数据源」启用 Neon 独立试验或接入 Stello。不要因为缺少分支能力拒绝只读分析，也不要在来源库执行模拟写入。',
+    '用户明确要求模拟写入、比较改动或验证假设，且目标和改动范围清楚时，直接在普通项目对话执行。纯数据查询走只读流程。来源或改动范围有歧义时，只询问缺失信息。检查环境返回的 capabilities.canExperiment。普通 PostgreSQL 与仅用 URL 接入的 Neon 均支持查询、血缘和记忆；需要独立写入时，用户可在「数据源」接入 Stello；Neon 分支仍是实验性能力。不要因为缺少分支能力拒绝只读分析，也不要在来源库执行模拟写入。',
     '用户要比较多个方案时，先明确各方案的假设、共同统计口径和选择标准。对实时来源只调用一次 stellane_checkpoint 保存共享基线，再以同一个基线 environmentId 创建不同名称的实验；若用户已经指定可用基线则直接复用。不要为 A、B 分别截取变化中的来源，也不要让 B 从 A 的修改结果开始。各自保存 work.id、experiment.id 和结果，可顺序执行，比较前核对两项任务的 baselineId 相同。',
     '1. 用 `stellane_environments` 找到唯一明确且 capabilities.canExperiment 为 true 的来源或用户指定的基线。用 `stellane_start_experiment` 创建任务，准备就绪后获取 experiment.id 和 work.id。用户继续同一实验或工具调用中断时，先用 `stellane_experiments` 查看原任务。准备失败可用原名称和来源恢复。',
     '2. 所有实验 SQL 只传工作分支 work.id。先按需查结构和改动前的指标，再用 `stellane_execute` 提交必要的 DDL 或 DML，用 `stellane_query` 核验结果。写入状态为 unknown 时先用 `stellane_reconcile_write` 查原回执，禁止重放原 SQL。',

@@ -32,14 +32,16 @@ assert(!entries.some(path => /\/(?:\.stellane-dev|node_modules|\.git|src|tests)\
   || /(?:reader-password|credentials\.yaml|postgres\.env)$/.test(path)), 'Private/development files entered the archive.');
 const sandbox = await mkdtemp(join(tmpdir(), 'stellane-package-'));
 try {
-  await writeFile(join(sandbox, 'package.json'), JSON.stringify({ name: 'stellane-release-smoke', private: true, type: 'module' }));
+  await writeFile(join(sandbox, 'package.json'), JSON.stringify({ name: 'stellane-release-smoke', private: true,
+    type: 'module', packageManager: manifest.packageManager }));
   console.log('Installing only the archive in a fresh directory…');
   run('pnpm', ['add', archive, '--ignore-scripts'], sandbox);
   const installed = join(sandbox, 'node_modules', '@stellane', 'harness-plugin');
   assert.equal(JSON.parse(await readFile(join(installed, 'package.json'), 'utf8')).version, manifest.version);
-  for (const command of ['scripts/demo.mjs', 'dist/demo-branches.js', 'scripts/dev-neon.mjs']) {
-    assert(run(process.execPath, [join(installed, command), '--help'], sandbox).length > 50);
+  for (const command of Object.keys(manifest.bin)) {
+    assert(run('pnpm', ['exec', command, '--help'], sandbox).length > 50, `Published command failed: ${command}`);
   }
+  assert(run(process.execPath, [join(installed, 'dist/demo-branches.js'), '--help'], sandbox).length > 50);
   const installedFiles = await readdir(installed);
   assert(!installedFiles.includes('src'));
   const bytes = await readFile(archive);

@@ -2,7 +2,7 @@
 
 **Understand your Postgres data. Explore different paths. Keep the evidence for every result.**
 
-Stellane is a DeepSeek Harness plugin for asking questions and testing ideas in ordinary chat. It helps the Agent understand tables, remember verified relationships and revisit them when data changes. With Neon branching or Stello, the Agent can try alternative changes on separate database branches, compare their results and keep the source unchanged through Stellane.
+Stellane is a DeepSeek Harness plugin for asking questions and testing ideas in ordinary chat. It helps the Agent understand tables, remember verified relationships and revisit them when data changes. With Stello, the Agent can try alternative changes on separate database branches, compare their results and keep the source unchanged through Stellane.
 
 Multiple trial paths are central to Stellane: start from a common baseline, let each idea develop independently, then make a decision with evidence. The side panel shows sources, memory, SQL, experiment progress and retained results.
 
@@ -60,20 +60,20 @@ The current workflow supports separately named experiments from a shared baselin
 
 Stellane uses the provider's database branching rather than implementing its own copy engine. Stello provides fixed data states. Neon provides branches that Stellane treats as read-only baselines and results; an external administrator can still change them. Neon results can depend on retained parent branches. The panel reports that retention. Local Docker timelines occupy disk; a cloud account can incur charges. The self-hosted Docker route is under validation; its complete runtime test has not passed yet. Branch startup time and resource cost depend on the provider and workload.
 
-## Install the preview
+## Install Stellane
 
-Version **0.3.0-preview.1** targets Harness Web with Node.js **24.9+** and DSH **0.2.2-rc.1 through rc.3**. Start with a DSH profile whose model connection already works. The preview archive contains built code; users do not need a compiler or a checkout.
+The **0.1.0** release candidate targets Harness Web with Node.js **24.9+** and DSH **0.2.2-rc.1 through rc.3**. Start with a DSH profile whose model connection already works. The preview archive contains built code; users do not need a compiler or a checkout.
 
-Install the published preview:
+To test the 0.1.0 candidate, run `corepack pnpm test:package` from the checkout and install the generated archive. The npm install below is for the previously published preview.
 
 ```sh
 dsh plugin --profile web add @stellane/harness-plugin@0.3.0-preview.1
 ```
 
-You can also download the `.tgz` from the [GitHub preview release](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1) and install it using its actual absolute path:
+Install the 0.1.0 archive using its actual absolute path:
 
 ```sh
-dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
+dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
 ```
 
 Restart the same Web Host, then open Stellane from the sidebar. If you launch it in a terminal, stop that Host and run `dsh web`; for a remote Host use `dsh web --no-open` and your existing access method.
@@ -148,6 +148,6 @@ You can stay in chat for daily work. Open the panel when you want to inspect or 
 - Source connections are read-only through Stellane. Writes are restricted to plugin-created experiment branches. Use a database role with the access you want to grant.
 - State and evidence live on one Harness Host. Distributed hosting, general multi-Agent experiment scheduling and automatic production adoption are outside the current scope.
 
-PostgreSQL and Stello have real-database integration tests. Neon cloud execution remains outside this preview; API contract checks are not a cloud acceptance result. The self-hosted Docker setup uses open-source Neon services and a Stellane development controller, independently of a paid cloud account. See [the test guide](DEVELOPMENT.md#检查与验收) for requirements and coverage. Demo outputs illustrate behavior on synthetic data, not a promise of production accuracy or speed.
+PostgreSQL and Stello are the 0.1 release paths. Local and cloud Neon branching are experimental and outside the 0.1 acceptance scope; API contract checks are not a cloud acceptance result. The self-hosted Docker setup uses open-source Neon services and a Stellane development controller, independently of a paid cloud account. See [the test guide](DEVELOPMENT.md#检查与验收) for requirements and coverage. Demo outputs illustrate behavior on synthetic data, not a promise of production accuracy or speed.
 
 See [release status](docs/release-status.md) for verified behavior and remaining release gates.
