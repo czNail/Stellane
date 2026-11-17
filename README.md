@@ -64,7 +64,13 @@ Stellane uses the provider's database branching rather than implementing its own
 
 Version **0.3.0-preview.1** targets Harness Web with Node.js **24.9+** and DSH **0.2.2-rc.1 through rc.3**. Start with a DSH profile whose model connection already works. The preview archive contains built code; users do not need a compiler or a checkout.
 
-Download the `.tgz` from the [GitHub preview release](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1) and install it using its actual absolute path:
+Install the published preview:
+
+```sh
+dsh plugin --profile web add @stellane/harness-plugin@0.3.0-preview.1
+```
+
+You can also download the `.tgz` from the [GitHub preview release](https://github.com/czNail/Stellane/releases/tag/v0.3.0-preview.1) and install it using its actual absolute path:
 
 ```sh
 dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.3.0-preview.1.tgz
