@@ -10,7 +10,7 @@ import { connectPostgresInput, connectNeonInput } from './onboarding-models.ts';
 import { neonInput } from './neon-models.ts';
 import { managementInput, type ManagementView } from './management-models.ts';
 
-export const PACKAGE = '@stellane/harness-plugin';
+export const PACKAGE = 'stellane';
 export const requestSchemas = {
   management: z.strictObject({}),
   manage: managementInput,

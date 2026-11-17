@@ -6,14 +6,16 @@
 
 需要 Node.js **24.9+**、DeepSeek Harness Web **0.2.2-rc.1 至 rc.3** 和可用的 DSH 模型连接。安装已在 Linux 实测。
 
+在 **插件 → 添加插件** 中输入 `stellane`。也可以用命令行安装。
+
 ```sh
-dsh plugin --profile web add @stellane/harness-plugin@0.1.0
+dsh plugin --profile web add stellane
 ```
 
-也可从 [GitHub Release](https://github.com/czNail/Stellane/releases/tag/v0.1.0) 下载归档，并传入本机绝对路径。
+也可以运行 `npm pack stellane@0.1.0` 下载安装包，再传入本机绝对路径。
 
 ```sh
-dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
+dsh plugin --profile web add /absolute/path/stellane-0.1.0.tgz
 ```
 
 重启该配置的 Web Host，再打开 **Stellane → 数据源 → 添加数据源**。普通 PostgreSQL URL 即可用于分析、血缘和记忆。
@@ -82,7 +84,7 @@ dsh plugin --profile web exec stellane-demo url
 停止 Host，从同一 profile 移除插件：
 
 ```sh
-dsh plugin --profile web remove @stellane/harness-plugin
+dsh plugin --profile web remove stellane
 ```
 
 再重启 Host。卸载包不会删除状态、备份、演示数据卷、DSH 聊天或提供方数据库。按各自保留需求另行处理；各处可能保存的内容见[数据与隐私](data-and-privacy.zh-CN.md)。

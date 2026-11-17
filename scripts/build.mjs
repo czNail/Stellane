@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { mkdir } from 'node:fs/promises';
+import manifest from '../package.json' with { type: 'json' };
 
 await mkdir('dist', { recursive: true });
 await build({
@@ -19,6 +20,6 @@ await build({
   tsconfig: 'tsconfig.client.json', jsx: 'automatic',
   external: ['react', 'react/jsx-runtime'], sourcemap: true,
   loader: { '.css': 'text' },
-  banner: { js: 'window.__ModuleLoader__.load({ id: "@stellane/harness-plugin", factory: (require) => { const module = { exports: {} }; const exports = module.exports;' },
+  banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(manifest.name)}, factory: (require) => { const module = { exports: {} }; const exports = module.exports;` },
   footer: { js: 'return module.exports; } });' },
 });

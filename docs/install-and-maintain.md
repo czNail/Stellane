@@ -6,14 +6,16 @@
 
 Use Node.js **24.9+**, DeepSeek Harness Web **0.2.2-rc.1 through rc.3**, and a working DSH model connection. Installation was verified on Linux.
 
+In **Plugins → Add plugin**, enter `stellane`. The equivalent CLI command is:
+
 ```sh
-dsh plugin --profile web add @stellane/harness-plugin@0.1.0
+dsh plugin --profile web add stellane
 ```
 
-To install from an archive, download it from the [GitHub release](https://github.com/czNail/Stellane/releases/tag/v0.1.0) and pass its absolute path.
+To download an installable archive, run `npm pack stellane@0.1.0` and pass its absolute path.
 
 ```sh
-dsh plugin --profile web add /absolute/path/stellane-harness-plugin-0.1.0.tgz
+dsh plugin --profile web add /absolute/path/stellane-0.1.0.tgz
 ```
 
 Restart the Web Host for that profile, then open **Stellane → Data sources → Add data source**. A PostgreSQL URL is enough for analysis, lineage and memory.
@@ -82,7 +84,7 @@ First finish/reconcile experiments and remove unwanted retained branches in Mana
 Stop the Host, then remove the package from the same profile:
 
 ```sh
-dsh plugin --profile web remove @stellane/harness-plugin
+dsh plugin --profile web remove stellane
 ```
 
 Restart the Host. Removing the package does not remove Stellane state, backups, demo volumes, DSH chats or provider databases. Review those separately according to your retention needs. See [data and privacy](data-and-privacy.md) for what each may contain.

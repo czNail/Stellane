@@ -64,8 +64,10 @@ Stellane 使用提供方的数据库分支能力。Stello 提供固定数据切�
 
 Stellane 0.1.0 需要 Node.js **24.9+**、DeepSeek Harness Web **0.2.2-rc.1 至 rc.3** 和可用的 DSH 模型连接。安装已在 Linux 实测。
 
+在 DSH 中打开 **插件 → 添加插件**，输入 `stellane`。也可以用命令行安装。
+
 ```sh
-dsh plugin --profile web add @stellane/harness-plugin@0.1.0
+dsh plugin --profile web add stellane
 ```
 
 重启该配置的 Web Host，从侧栏打开 Stellane。面板支持中英文切换。归档安装、备份与卸载见[安装与维护](docs/install-and-maintain.zh-CN.md)。

@@ -36,8 +36,10 @@ try {
     type: 'module', packageManager: manifest.packageManager }));
   console.log('Installing only the archive in a fresh directory…');
   run('pnpm', ['add', archive, '--ignore-scripts'], sandbox);
-  const installed = join(sandbox, 'node_modules', '@stellane', 'harness-plugin');
-  assert.equal(JSON.parse(await readFile(join(installed, 'package.json'), 'utf8')).version, manifest.version);
+  const installed = join(sandbox, 'node_modules', manifest.name);
+  const installedManifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'));
+  assert.equal(installedManifest.name, manifest.name);
+  assert.equal(installedManifest.version, manifest.version);
   for (const command of Object.keys(manifest.bin)) {
     assert(run('pnpm', ['exec', command, '--help'], sandbox).length > 50, `Published command failed: ${command}`);
   }

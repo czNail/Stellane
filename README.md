@@ -64,8 +64,10 @@ Stellane uses the provider's database branching rather than implementing its own
 
 Stellane 0.1.0 requires Node.js **24.9+**, DeepSeek Harness Web **0.2.2-rc.1 through rc.3**, and a working DSH model connection. Installation was verified on Linux.
 
+In DSH, open **Plugins → Add plugin** and enter `stellane`. From the command line:
+
 ```sh
-dsh plugin --profile web add @stellane/harness-plugin@0.1.0
+dsh plugin --profile web add stellane
 ```
 
 Restart the Web Host for that profile and open Stellane from the sidebar. The panel supports English and Chinese. For a downloaded archive, state backups or uninstall instructions, see [installation and maintenance](docs/install-and-maintain.md).
