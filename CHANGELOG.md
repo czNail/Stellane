@@ -7,6 +7,8 @@
 - Keep local and cloud Neon branching experimental. A PostgreSQL-compatible connection still supports ordinary read-only analysis.
 - Installable archives include working DSH helper commands and bilingual onboarding, maintenance and privacy guidance.
 
+See the archived v0.1.0 acceptance records. [English](https://github.com/czNail/Stellane/blob/v0.1.0/docs/release-status.md) · [中文](https://github.com/czNail/Stellane/blob/v0.1.0/docs/release-status.zh-CN.md)
+
 ## 0.3.0-preview.1
 
 Preview for DSH Web 0.2.2-rc.1–rc.3 and Node.js 24.9+. Published as a temporary preview on npm and GitHub.
@@ -19,5 +21,3 @@ Preview for DSH Web 0.2.2-rc.1–rc.3 and Node.js 24.9+. Published as a temporar
 - State format 7 adds exclusive ownership, checked migration backups and rejection of newer formats. Stop all older Hosts before upgrading; early development builds cannot safely read this format. See [upgrade and recovery](docs/install-and-maintain.md#upgrade-and-recover).
 
 The preview is a single-Host product. It does not provide organization-wide access administration, automatic production adoption, general multi-Agent scheduling or complete external/column-transformation lineage. Contract tests, actual database tests and model-driven demonstrations are separate evidence; a skipped provider test is not acceptance. See [development and validation](DEVELOPMENT.md).
-
-See [release verification](docs/release-status.md) for the 0.1 acceptance results.

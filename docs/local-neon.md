@@ -1,7 +1,6 @@
 # Try database branches with local Neon
 
-**Experimental, not yet accepted:** the local Docker deployment has not completed a live startup/branch/restart/cleanup run. The steps below are the intended development workflow, not a claim that it passed. See [release status](release-status.md).
-
+**Experimental.** Live validation of startup, branching, restart and cleanup is pending.
 
 [中文](local-neon.zh-CN.md) · [Experiment walkthrough](experiments.md) · [Development](../DEVELOPMENT.md#neon)
 

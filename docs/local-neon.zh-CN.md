@@ -1,7 +1,6 @@
 # 用本地 Neon 体验数据库分支
 
-**实验性，尚未完成验收：** 本地 Docker 部署还没有跑通完整的启动、真实分支、重启和清理流程。以下是开发验证步骤，不代表已验证可用。进度见[发布状态](release-status.zh-CN.md)。
-
+**实验性。** 启动、创建真实分支、重启和清理的完整流程仍待验收。
 
 [English](local-neon.md) · [多路径试验](experiments.zh-CN.md) · [开发说明](../DEVELOPMENT.md#neon)
 

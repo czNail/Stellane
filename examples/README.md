@@ -73,4 +73,4 @@ dsh plugin --profile web exec stellane-demo stop
 
 If you resume an older demo with two datasets, run `reset` when prompted, then `start` again. This resets telemetry and removes the retired support fixture from that demo database.
 
-[Branch verification and expected values](../DEVELOPMENT.md#真实分支对照) · [0.1 verification results](../docs/release-status.md)
+[Branch verification and expected values](../DEVELOPMENT.md#真实分支对照)

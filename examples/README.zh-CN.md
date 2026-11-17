@@ -73,4 +73,4 @@ dsh plugin --profile web exec stellane-demo stop
 
 恢复旧版的双数据集演示时，按提示运行 `reset`，再运行 `start`。这会还原事件样例，并从该演示库删除旧工单样例。
 
-[分支验收和预期值](../DEVELOPMENT.md#真实分支对照) · [0.1 演示验收记录](../docs/release-status.zh-CN.md)
+[分支验收和预期值](../DEVELOPMENT.md#真实分支对照)
